@@ -6,14 +6,20 @@ import { useRef, useState, useCallback, useEffect, useMemo, memo, type Dispatch,
 import * as THREE from 'three';
 
 const ORTHO_CAM_Z = 22;
-const SCROLL_SPEED = 0.012;
 const DRAG_THRESHOLD = 5;
 const BLACK = new THREE.Color(0x000000);
-/** How far the lookAt target shifts when mouse is at canvas edge — creates Z parallax. */
-const TILT_X = 3.2;
-const TILT_Y = 1.6;
+const TILT_X = 1.6;
+const TILT_Y = 0; // vertical tilt causes z-depth-dependent floating; horizontal parallax is sufficient
 const LERP_MOUSE = 0.05;
-const Z_SCALE = 1.8;  // more Z depth so parallax is visible
+const Z_SCALE = 1.8;
+const ZOOM_FACTOR = 0.0012;   // zoom speed per pixel of deltaY
+const MIN_ZOOM = 0.15;
+const MAX_ZOOM = 6;
+const NODE_CLICK_ZOOM = 0.28; // target zoom when clicking a node
+const LERP_ZOOM = 0.09;       // animation speed for click-to-zoom
+/** Horizon color — matches the sky/ground backdrop at the horizon line */
+const BACKGROUND_COLOR = '#c4d6d0';
+const FOG_COLOR = '#c4d6d0';
 
 // ─── Tree generation (2D layout → z lift) ───────────────────
 
@@ -207,8 +213,13 @@ function buildNodes(): NodeDef[] {
 
 const NODES = buildNodes();
 const POS: [number, number, number][] = NODES.map((n) => [n.x, n.y, n.z]);
-const BR_R = [0.055, 0.04, 0.032, 0.025, 0.02, 0.016, 0.014];
-const BR_C = ['#3e2723', '#4e342e', '#5d4037', '#6d4c41', '#795548', '#8d6e63', '#8d6e63'];
+// Branch radii taper strongly with depth so deeper branches look thin/delicate
+const BR_R = [0.11, 0.072, 0.048, 0.032, 0.021, 0.014, 0.010];
+// Branch colors lighten with depth (darker near root, warmer at tips)
+const BR_C = ['#2c1a0e', '#3b2010', '#4e2f14', '#5d3a1a', '#6b4423', '#7a5233', '#8a6040'];
+// Roughness + metalness per depth level — near-root bark is rough, tips are smoother
+const BR_ROUGHNESS = [0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55];
+const BR_METALNESS  = [0.05, 0.07, 0.09, 0.10, 0.11, 0.12, 0.12];
 
 const TREE_PAD = 0.85;
 
@@ -226,9 +237,18 @@ function treeAxisBounds() {
   return { minX, maxX, minY, maxY };
 }
 
+const SKILL_TREE_BOUNDS = treeAxisBounds();
+
+/**
+ * Ground / trunk-base line in world Y. Trunk mesh: center y=-0.4, height 0.8 → bottom at -0.8.
+ * Frustum bottom is pinned to this so the ground reads as the bottom of the screen (not a mid-air strip).
+ */
+const FLOOR_LOCAL_Y = -0.8;
+
 /**
  * World-space XY frustum for the front (view) plane — same numbers drive SVG and OrthographicCamera.
  * Projection of any point (x, y, z) onto the view plane is (x, y); z only affects depth/lighting.
+ * Vertical framing: bottom edge = floor (tree bases + ground), top from aspect fit.
  */
 function orthoFrustumForViewport(
   vw: number,
@@ -238,11 +258,12 @@ function orthoFrustumForViewport(
   if (vw <= 0 || vh <= 0) {
     return { left: -1, right: 1, top: 1, bottom: -1 };
   }
-  const { minX, maxX, minY, maxY } = treeAxisBounds();
+  const { minX, maxX, maxY } = treeAxisBounds();
   const bw = maxX - minX + pad * 2;
-  const bh = maxY - minY + pad * 2;
+  // Include ground padding below the floor so the trunk base is visible above the ground strip
+  const groundPad = pad * 1.1;
+  const bh = maxY - FLOOR_LOCAL_Y + pad + groundPad;
   const cx = (minX + maxX) / 2;
-  const cy = (minY + maxY) / 2;
   const ar = vw / vh;
   const boxAr = bw / bh;
   let halfW: number;
@@ -254,28 +275,35 @@ function orthoFrustumForViewport(
     halfH = bh / 2;
     halfW = halfH * ar;
   }
+  const bottom = FLOOR_LOCAL_Y - groundPad;
+  const top = bottom + 2 * halfH;
   return {
     left: cx - halfW,
     right: cx + halfW,
-    bottom: cy - halfH,
-    top: cy + halfH,
+    bottom,
+    top,
   };
 }
 
-function applyPanToWorldFrustum(
+interface ViewState {
+  panX: number;
+  panY: number;
+  zoom: number;
+}
+
+const DEFAULT_VIEW: ViewState = { panX: 0, panY: 0, zoom: 1 };
+
+function applyViewState(
   base: { left: number; right: number; top: number; bottom: number },
-  pan: { x: number; y: number },
+  vs: ViewState,
 ): { left: number; right: number; top: number; bottom: number } {
-  const halfW = (base.right - base.left) / 2;
-  const halfH = (base.top - base.bottom) / 2;
-  const tcx = (base.left + base.right) / 2;
-  const tcy = (base.bottom + base.top) / 2;
-  return {
-    left: tcx + pan.x - halfW,
-    right: tcx + pan.x + halfW,
-    bottom: tcy + pan.y - halfH,
-    top: tcy + pan.y + halfH,
-  };
+  const baseCx = (base.left + base.right) / 2;
+  const baseCy = (base.bottom + base.top) / 2;
+  const halfW = ((base.right - base.left) / 2) * vs.zoom;
+  const halfH = ((base.top - base.bottom) / 2) * vs.zoom;
+  const cx = baseCx + vs.panX;
+  const cy = baseCy + vs.panY;
+  return { left: cx - halfW, right: cx + halfW, bottom: cy - halfH, top: cy + halfH };
 }
 
 /** Three.js ortho planes are in camera space; camera sits at world (cx, cy, z) looking at (cx, cy, 0). */
@@ -293,13 +321,196 @@ function worldFrustumToCameraLocal(frustum: {
   return { left: -halfW, right: halfW, bottom: -halfH, top: halfH, cx, cy };
 }
 
+// ─── Background Forest ──────────────────────────────────────
+
+interface BgTreeDef {
+  id: number;
+  x: number;
+  y: number;
+  z: number;
+  scale: number;
+  lean: number;
+}
+
+/** Group origin Y so trunk base sits on FLOOR_LOCAL_Y (matches cylinder layout in BackgroundTree) */
+function forestTreeGroupY(scale: number): number {
+  return FLOOR_LOCAL_Y + 0.7 * scale;
+}
+
+/**
+ * Structured forest: left + right stands + back row, all planted on the same floor;
+ * depth rows use more negative Z for farther trees (smaller scale). Center kept clear for the skill tree.
+ */
+function buildForestBackgroundTrees(): BgTreeDef[] {
+  const out: BgTreeDef[] = [];
+  const { minX, maxX } = SKILL_TREE_BOUNDS;
+  const cx = (minX + maxX) / 2;
+  const halfW = (maxX - minX) / 2 + 0.4;
+
+  let id = 0;
+
+  const leftMin = minX - 14.5;
+  const leftMax = minX - 0.95;
+  const rightMin = maxX + 0.95;
+  const rightMax = maxX + 14.5;
+
+  const zDepths = [-5.2, -6.8, -8.4, -10.2, -12.5, -15, -17.5];
+
+  zDepths.forEach((zBase, zi) => {
+    const scaleMul = Math.max(0.42, 1.05 - zi * 0.085);
+    const nPerSide = 5 + Math.min(zi, 4);
+    for (let side = 0; side < 2; side++) {
+      const isLeft = side === 0;
+      const xMin = isLeft ? leftMin : rightMin;
+      const xMax = isLeft ? leftMax : rightMax;
+      for (let i = 0; i < nPerSide; i++) {
+        const t = nPerSide > 1 ? i / (nPerSide - 1) : 0.5;
+        const x = xMin + t * (xMax - xMin) + (hash(id * 97) - 0.5) * 0.5;
+        const scale = (0.52 + hash(id * 673) * 0.48) * scaleMul;
+        const z = zBase + (hash(id * 503) - 0.5) * 0.75;
+        out.push({
+          id: id++,
+          x,
+          y: forestTreeGroupY(scale),
+          z,
+          scale,
+          lean: (hash(id * 809) - 0.5) * 0.12,
+        });
+      }
+    }
+  });
+
+  for (let xi = -23; xi <= 23; xi += 1.45) {
+    if (Math.abs(xi - cx) < halfW + 1.0) continue;
+    const scale = (0.48 + hash(id * 701) * 0.38) * 0.62;
+    out.push({
+      id: id++,
+      x: xi + (hash(id * 401) - 0.5) * 0.4,
+      y: forestTreeGroupY(scale),
+      z: -19 + (hash(id * 223) - 0.5) * 1.0,
+      scale,
+      lean: (hash(id * 809) - 0.5) * 0.1,
+    });
+  }
+
+  return out;
+}
+
+const BG_TREES = buildForestBackgroundTrees();
+
+const BG_FOLIAGE: { x: number; y: number; z: number; r: number; ci: number }[] = [
+  { x: 0,     y: 0.55, z: 0,     r: 0.22, ci: 0 },
+  { x: -0.20, y: 1.05, z: 0.06,  r: 0.18, ci: 1 },
+  { x:  0.22, y: 1.15, z:-0.06,  r: 0.17, ci: 1 },
+  { x:  0,    y: 1.65, z: 0,     r: 0.15, ci: 2 },
+  { x: -0.14, y: 2.05, z: 0.05,  r: 0.13, ci: 2 },
+  { x:  0.15, y: 2.15, z:-0.05,  r: 0.12, ci: 3 },
+  { x:  0,    y: 2.55, z: 0,     r: 0.10, ci: 3 },
+];
+
+const BG_FOLIAGE_COLORS = ['#3d8a72', '#4a9a78', '#3d7a8a', '#4a8a6a'];
+
+/**
+ * Backdrop plane centered on FLOOR_LOCAL_Y.
+ * vUv.y == 0.5  → horizon / floor line
+ * vUv.y  > 0.5  → sky  (0.5 = horizon, 1.0 = zenith)
+ * vUv.y  < 0.5  → ground (0.5 = horizon, 0.0 = deep earth)
+ * This means the void *below* the floor always shows ground color,
+ * so zooming out never reveals empty space.
+ */
+const BACKDROP_VS = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+const BACKDROP_FS = `
+  varying vec2 vUv;
+  void main() {
+    float t = vUv.y; // 0 = bottom, 1 = top, 0.5 = horizon
+    vec3 col;
+    if (t >= 0.5) {
+      float s = (t - 0.5) * 2.0; // 0 at horizon, 1 at zenith
+      vec3 horizon = vec3(0.77, 0.84, 0.82);
+      vec3 zenith  = vec3(0.54, 0.69, 0.80);
+      col = mix(horizon, zenith, pow(s, 0.75));
+    } else {
+      float s = t * 2.0; // 0 at deep earth, 1 at horizon
+      vec3 earth   = vec3(0.18, 0.26, 0.22);
+      vec3 horizon = vec3(0.42, 0.54, 0.48);
+      col = mix(earth, horizon, pow(s, 0.6));
+    }
+    gl_FragColor = vec4(col, 1.0);
+  }
+`;
+
+const BackgroundTree = memo(function BackgroundTree({ tree }: { tree: BgTreeDef }) {
+  const { x, y, z, scale, lean } = tree;
+  return (
+    <group position={[x, y, z]} rotation={[0, 0, lean]}>
+      <mesh position={[0, -0.35 * scale, 0]}>
+        <cylinderGeometry args={[0.03 * scale, 0.065 * scale, 0.7 * scale, 5]} />
+        <meshBasicMaterial color="#2d4a3a" transparent opacity={0.88} />
+      </mesh>
+      {BG_FOLIAGE.map((f, i) => (
+        <mesh key={i} position={[f.x * scale, f.y * scale, f.z * scale]}>
+          <sphereGeometry args={[f.r * scale, 8, 8]} />
+          <meshBasicMaterial
+            color={BG_FOLIAGE_COLORS[f.ci % BG_FOLIAGE_COLORS.length]}
+            transparent
+            opacity={0.82}
+          />
+        </mesh>
+      ))}
+    </group>
+  );
+});
+
+/**
+ * Sky+ground backdrop centered on FLOOR_LOCAL_Y.
+ *
+ * Placed at z = -1 (one unit behind the origin, just behind the trunk at z≈-0.3).
+ * Keeping it close to the trunk's Z means camera-tilt parallax between the backdrop's
+ * horizon line and the trunk base is < 0.03 world units — imperceptible.
+ * (At z = -38, the same tilt would create a ~1.4 world-unit gap.)
+ *
+ * depthTest=false + depthWrite=false + renderOrder=-10 → always paints behind everything
+ * without interfering with the depth buffer of foreground objects.
+ */
+function SceneBackdrop() {
+  return (
+    <mesh position={[0, FLOOR_LOCAL_Y, -1]} renderOrder={-10}>
+      <planeGeometry args={[800, 800]} />
+      <shaderMaterial
+        vertexShader={BACKDROP_VS}
+        fragmentShader={BACKDROP_FS}
+        depthTest={false}
+        depthWrite={false}
+        side={THREE.DoubleSide}
+      />
+    </mesh>
+  );
+}
+
+function BackgroundForest() {
+  return (
+    <>
+      <SceneBackdrop />
+      {BG_TREES.map((t) => (
+        <BackgroundTree key={t.id} tree={t} />
+      ))}
+    </>
+  );
+}
+
 // ─── Trunk ──────────────────────────────────────────────────
 
 function Trunk() {
   return (
     <mesh position={[0, -0.4, -0.3]}>
-      <cylinderGeometry args={[0.07, 0.14, 0.8, 6]} />
-      <meshStandardMaterial color="#3e2723" roughness={0.8} />
+      <cylinderGeometry args={[0.10, 0.21, 0.8, 10]} />
+      <meshStandardMaterial color="#1e0f08" roughness={0.78} metalness={0.06} />
     </mesh>
   );
 }
@@ -323,14 +534,19 @@ const BranchTube = memo(function BranchTube({
     const cp = new THREE.Vector3(midX, midY, midZ + bulge);
     const curve = new THREE.QuadraticBezierCurve3(s, cp, e);
     const r = BR_R[Math.min(parent.depth, BR_R.length - 1)];
-    return new THREE.TubeGeometry(curve, 14, r, 5, false);
+    // More radial segments on thick near-root branches so lighting curves look smooth
+    const radialSegs = parent.depth < 2 ? 10 : parent.depth < 4 ? 7 : 5;
+    return new THREE.TubeGeometry(curve, 16, r, radialSegs, false);
   }, [parent, child]);
 
-  const color = BR_C[Math.min(parent.depth, BR_C.length - 1)];
+  const di = Math.min(parent.depth, BR_C.length - 1);
+  const color     = BR_C[di];
+  const roughness = BR_ROUGHNESS[di];
+  const metalness = BR_METALNESS[di];
 
   return (
     <mesh geometry={geometry}>
-      <meshStandardMaterial color={color} roughness={0.7} />
+      <meshStandardMaterial color={color} roughness={roughness} metalness={metalness} />
     </mesh>
   );
 });
@@ -400,9 +616,9 @@ const SkillNode = memo(function SkillNode({
           ref={matRef}
           color={node.color}
           emissive={node.color}
-          emissiveIntensity={0.2}
-          roughness={0.2}
-          metalness={0.1}
+          emissiveIntensity={0.12}
+          roughness={0.38}
+          metalness={0.18}
         />
       </mesh>
     </group>
@@ -440,12 +656,9 @@ function TreeMeshes({
 
 interface OrthoSkillSceneProps {
   viewPixels?: { w: number; h: number };
-  pan?: { x: number; y: number };
-  setPan?: Dispatch<SetStateAction<{ x: number; y: number }>>;
-  /**
-   * When true (default), camera tilt follows mouse to reveal Z depth via parallax.
-   * Disable in compare mode so the straight-on projection matches the 2D overlay exactly.
-   */
+  viewState?: ViewState;
+  setViewState?: Dispatch<SetStateAction<ViewState>>;
+  /** When true (default), camera tilt follows mouse to reveal Z depth via parallax. */
   enableTilt?: boolean;
 }
 
@@ -454,21 +667,26 @@ interface OrthoSkillSceneProps {
  * Same mapping as `Layout2DOverlay` when both use the same world frustum + pixel dimensions.
  */
 function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
-  const { viewPixels, pan: panProp, setPan: setPanProp, enableTilt = true } = props;
+  const { viewPixels, viewState: vsProp, setViewState: setVsProp, enableTilt = true } = props;
   const { camera, gl, size } = useThree();
-  const [internalPan, setInternalPan] = useState({ x: 0, y: 0 });
+  const [internalVs, setInternalVs] = useState<ViewState>(DEFAULT_VIEW);
   const [hovered, setHovered] = useState<number | null>(null);
 
-  const pan = panProp ?? internalPan;
-  const setPan = setPanProp ?? setInternalPan;
+  const vs = vsProp ?? internalVs;
+  const setVs = setVsProp ?? setInternalVs;
   const vw = viewPixels?.w ?? size.width;
   const vh = viewPixels?.h ?? size.height;
 
   const worldFrustum = useMemo(() => {
     if (vw <= 0 || vh <= 0) return null;
     const base = orthoFrustumForViewport(vw, vh);
-    return applyPanToWorldFrustum(base, pan);
-  }, [vw, vh, pan.x, pan.y]);
+    return applyViewState(base, vs);
+  }, [vw, vh, vs.panX, vs.panY, vs.zoom]);
+
+  const vsRef = useRef(vs);
+  vsRef.current = vs;
+
+  const targetVsRef = useRef<ViewState | null>(null);
 
   const ctrl = useRef({
     lastX: 0,
@@ -510,9 +728,30 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
     const c = ctrl.current;
     c.smX += (c.mouseX - c.smX) * LERP_MOUSE;
     c.smY += (c.mouseY - c.smY) * LERP_MOUSE;
-    const tiltX = enableTilt ? c.smX * TILT_X : 0;
-    const tiltY = enableTilt ? c.smY * TILT_Y : 0;
+    // Reduce parallax when zoomed in: zoom < 1 means zoomed in, so scale tilt down proportionally.
+    const parallaxScale = THREE.MathUtils.clamp(vsRef.current.zoom, 0, 1);
+    const tiltX = enableTilt ? c.smX * TILT_X * parallaxScale : 0;
+    const tiltY = enableTilt ? c.smY * TILT_Y * parallaxScale : 0;
     cam.lookAt(cx + tiltX, cy + tiltY, 0);
+
+    // Animate towards click-to-zoom target
+    const tgt = targetVsRef.current;
+    if (tgt) {
+      const cur = vsRef.current;
+      const newZoom = THREE.MathUtils.lerp(cur.zoom, tgt.zoom, LERP_ZOOM);
+      const newPanX = THREE.MathUtils.lerp(cur.panX, tgt.panX, LERP_ZOOM);
+      const newPanY = THREE.MathUtils.lerp(cur.panY, tgt.panY, LERP_ZOOM);
+      if (
+        Math.abs(newZoom - tgt.zoom) < 0.0005 &&
+        Math.abs(newPanX - tgt.panX) < 0.0005 &&
+        Math.abs(newPanY - tgt.panY) < 0.0005
+      ) {
+        setVs(tgt);
+        targetVsRef.current = null;
+      } else {
+        setVs({ zoom: newZoom, panX: newPanX, panY: newPanY });
+      }
+    }
 
     cam.updateProjectionMatrix();
   });
@@ -523,10 +762,35 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
 
     const onWheel = (e: WheelEvent) => {
       e.preventDefault();
+      targetVsRef.current = null;
       if (vw <= 0 || vh <= 0) return;
-      const base = orthoFrustumForViewport(vw, vh);
-      const wh = base.top - base.bottom;
-      setPan((p) => ({ x: p.x, y: p.y + e.deltaY * SCROLL_SPEED * wh }));
+      const rect = el.getBoundingClientRect();
+      const mx = e.clientX - rect.left;  // mouse pixels from canvas left
+      const my = e.clientY - rect.top;   // mouse pixels from canvas top
+
+      setVs((prev) => {
+        const base = orthoFrustumForViewport(vw, vh);
+        const cur = applyViewState(base, prev);
+        const baseCx = (base.left + base.right) / 2;
+        const baseCy = (base.bottom + base.top) / 2;
+
+        // World position under mouse with current frustum
+        const mwx = cur.left + (mx / vw) * (cur.right - cur.left);
+        const mwy = cur.bottom + (1 - my / vh) * (cur.top - cur.bottom);
+
+        const newZoom = THREE.MathUtils.clamp(
+          prev.zoom * (1 - e.deltaY * ZOOM_FACTOR),
+          MIN_ZOOM,
+          MAX_ZOOM,
+        );
+        const ratio = newZoom / prev.zoom;
+
+        // Shift pan so the world point under the mouse stays fixed
+        const newCx = mwx + (baseCx + prev.panX - mwx) * ratio;
+        const newCy = mwy + (baseCy + prev.panY - mwy) * ratio;
+
+        return { panX: newCx - baseCx, panY: newCy - baseCy, zoom: newZoom };
+      });
     };
 
     const onDown = (e: PointerEvent) => {
@@ -550,10 +814,6 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       c.mouseX = ((e.clientX - rect.left) / rect.width - 0.5) * 2;
       c.mouseY = -((e.clientY - rect.top) / rect.height - 0.5) * 2;
 
-      const base = orthoFrustumForViewport(vw, vh);
-      const ww = base.right - base.left;
-      const wh = base.top - base.bottom;
-
       if (c.panCandidate && !c.panDragging) {
         const d = Math.hypot(e.clientX - c.panDownX, e.clientY - c.panDownY);
         if (d > DRAG_THRESHOLD) {
@@ -569,9 +829,18 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
         const dy = e.clientY - c.lastY;
         c.lastX = e.clientX;
         c.lastY = e.clientY;
-        const dxW = (-dx / vw) * ww;
-        const dyW = (dy / vh) * wh;
-        setPan((p) => ({ x: p.x + dxW, y: p.y + dyW }));
+        targetVsRef.current = null;
+        // Scale pan delta by current zoom so a drag feels consistent at any zoom level
+        setVs((prev) => {
+          const base = orthoFrustumForViewport(vw, vh);
+          const ww2 = (base.right - base.left) * prev.zoom;
+          const wh2 = (base.top - base.bottom) * prev.zoom;
+          return {
+            ...prev,
+            panX: prev.panX + (-dx / vw) * ww2,
+            panY: prev.panY + (dy / vh) * wh2,
+          };
+        });
       }
     };
 
@@ -582,9 +851,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       el.style.cursor = 'grab';
     };
 
-    const resetView = () => {
-      setPan({ x: 0, y: 0 });
-    };
+    const resetView = () => setVs(DEFAULT_VIEW);
 
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'r' || e.key === 'R') resetView();
@@ -605,7 +872,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       el.removeEventListener('dblclick', resetView);
       window.removeEventListener('keydown', onKey);
     };
-  }, [gl, vw, vh, setPan]);
+  }, [gl, vw, vh, setVs]);
 
   const onNodeClick = useCallback(
     (node: NodeDef, e: ThreeEvent<MouseEvent>) => {
@@ -614,27 +881,34 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       const ne = e.nativeEvent;
       if (Math.hypot(ne.clientX - c.downX, ne.clientY - c.downY) > DRAG_THRESHOLD) return;
       if (vw <= 0 || vh <= 0) return;
-      const { tcx, tcy } = (() => {
-        const b = orthoFrustumForViewport(vw, vh);
-        return { tcx: (b.left + b.right) / 2, tcy: (b.bottom + b.top) / 2 };
-      })();
-      setPan({ x: node.x - tcx, y: node.y - tcy });
+      const b = orthoFrustumForViewport(vw, vh);
+      const baseCx = (b.left + b.right) / 2;
+      const baseCy = (b.bottom + b.top) / 2;
+      const targetZoom = Math.min(vsRef.current.zoom, NODE_CLICK_ZOOM);
+      targetVsRef.current = { panX: node.x - baseCx, panY: node.y - baseCy, zoom: targetZoom };
     },
-    [vw, vh, setPan],
+    [vw, vh],
   );
 
   return (
     <>
+      <color attach="background" args={[BACKGROUND_COLOR]} />
       <OrthographicCamera makeDefault near={0.1} far={120} left={-1} right={1} top={1} bottom={-1} />
 
-      <fog attach="fog" args={['#0a0a0f', 12, 36]} />
+      <fog attach="fog" args={[FOG_COLOR, 24, 78]} />
 
-      <ambientLight intensity={0.38} />
-      <directionalLight position={[2, 12, 10]} intensity={0.72} />
-      <directionalLight position={[-4, 6, 8]} intensity={0.22} color="#90caf9" />
-      <pointLight position={[0, -1, 6]} intensity={0.48} color="#ffd54f" distance={24} decay={2} />
-      <pointLight position={[0, 10, 6]} intensity={0.32} color="#90caf9" distance={24} decay={2} />
+      {/* Low ambient so unlit sides of branches stay visibly dark */}
+      <ambientLight intensity={0.18} />
+      {/* Strong key from upper-left-front — primary bark highlights */}
+      <directionalLight position={[-6, 14, 12]} intensity={1.6} color="#fff8f0" />
+      {/* Cool rim from upper-right-back — separates branches from sky */}
+      <directionalLight position={[8, 10, -4]} intensity={0.55} color="#b8d4e8" />
+      {/* Warm bounce from below (ground reflection) */}
+      <pointLight position={[0, -0.5, 5]} intensity={0.9} color="#c8a86a" distance={22} decay={2} />
+      {/* Soft sky fill from above */}
+      <pointLight position={[0, 16, 6]} intensity={0.45} color="#a8c8d8" distance={30} decay={2} />
 
+      <BackgroundForest />
       <TreeMeshes hovered={hovered} onHover={handleHover} onNodeClick={onNodeClick} />
     </>
   );
@@ -689,7 +963,7 @@ function Layout2DOverlay({
     <svg
       width={width}
       height={height}
-      style={{ display: 'block', background: '#0a0a0f' }}
+      style={{ display: 'block', background: BACKGROUND_COLOR }}
       aria-label="2D skill tree layout"
     >
       {lines.map((ln) => (
@@ -717,7 +991,7 @@ function CompareSplitView({ onClose }: { onClose: () => void }) {
   const [split, setSplit] = useState(0.5);
   const splitDragging = useRef(false);
   const [pane, setPane] = useState({ cw: 0, ch: 0 });
-  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [viewState, setViewState] = useState<ViewState>(DEFAULT_VIEW);
 
   useEffect(() => {
     const el = splitPaneRef.current;
@@ -751,12 +1025,10 @@ function CompareSplitView({ onClose }: { onClose: () => void }) {
   }, []);
 
   const sharedFrustum = useMemo(() => {
-    if (pane.cw <= 0 || pane.ch <= 0) {
-      return { left: -1, right: 1, top: 1, bottom: -1 };
-    }
+    if (pane.cw <= 0 || pane.ch <= 0) return { left: -1, right: 1, top: 1, bottom: -1 };
     const base = orthoFrustumForViewport(pane.cw, pane.ch);
-    return applyPanToWorldFrustum(base, pan);
-  }, [pane.cw, pane.ch, pan.x, pan.y]);
+    return applyViewState(base, viewState);
+  }, [pane.cw, pane.ch, viewState]);
 
   return (
     <div
@@ -765,7 +1037,7 @@ function CompareSplitView({ onClose }: { onClose: () => void }) {
         inset: 0,
         display: 'flex',
         flexDirection: 'column',
-        background: '#0a0a0f',
+        background: BACKGROUND_COLOR,
       }}
     >
       <div
@@ -809,8 +1081,8 @@ function CompareSplitView({ onClose }: { onClose: () => void }) {
                 zIndex: 0,
               }}
             >
-              <Canvas style={{ width: '100%', height: '100%', display: 'block' }} gl={{ antialias: true }}>
-                <OrthoSkillScene viewPixels={{ w: pane.cw, h: pane.ch }} pan={pan} setPan={setPan} enableTilt={false} />
+        <Canvas style={{ width: '100%', height: '100%', display: 'block' }} gl={{ antialias: true }}>
+                <OrthoSkillScene viewPixels={{ w: pane.cw, h: pane.ch }} viewState={viewState} setViewState={setViewState} enableTilt={false} />
               </Canvas>
             </div>
 
@@ -898,7 +1170,7 @@ export default function SkillTreeV3() {
   const [compare, setCompare] = useState(false);
 
   return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: '#0a0a0f' }}>
+    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: BACKGROUND_COLOR }}>
       {!compare && (
         <button
           type="button"
@@ -925,7 +1197,7 @@ export default function SkillTreeV3() {
       {compare ? (
         <CompareSplitView onClose={() => setCompare(false)} />
       ) : (
-        <Canvas gl={{ antialias: true }} style={{ width: '100%', height: '100%', background: '#0a0a0f' }}>
+        <Canvas gl={{ antialias: true }} style={{ width: '100%', height: '100%', background: BACKGROUND_COLOR }}>
           <OrthoSkillScene />
         </Canvas>
       )}
