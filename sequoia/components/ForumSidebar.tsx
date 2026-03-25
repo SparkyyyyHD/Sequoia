@@ -18,6 +18,13 @@ export default function ForumSidebar() {
           >
             All
           </Link>
+          <Link
+            href="/skill-tree-v3"
+            className="forum-sidebar-link"
+            data-active={pathname === "/skill-tree-v3" ? "true" : undefined}
+          >
+            Skill Tree
+          </Link>
 
           {/* Mobile: show category links inline */}
           {FORUM_CATEGORIES.map((category) => (
