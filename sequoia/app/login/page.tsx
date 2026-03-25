@@ -9,7 +9,7 @@ export default function LoginPage() {
   const router = useRouter();
   const { user, loading } = useAuth();
 
-  const [mode, setMode] = useState<"signin" | "signup">("signin");
+  const [mode, setMode] = useState<"signin" | "signup" | "forgot">("signin");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [displayName, setDisplayName] = useState("");
@@ -33,7 +33,7 @@ export default function LoginPage() {
     setSuccess(null);
   }
 
-  function switchMode(next: "signin" | "signup") {
+  function switchMode(next: "signin" | "signup" | "forgot") {
     setMode(next);
     resetForm();
   }
@@ -56,6 +56,31 @@ export default function LoginPage() {
         setError("Password must be at least 6 characters.");
         return;
       }
+    }
+
+    if (mode === "forgot") {
+      if (!email.trim()) {
+        setError("Please enter your email address.");
+        return;
+      }
+
+      setPending(true);
+
+      const { error: resetError } = await supabase.auth.resetPasswordForEmail(email, {
+        redirectTo: `${window.location.origin}/login`,
+      });
+
+      if (resetError) {
+        setError(resetError.message);
+        setPending(false);
+        return;
+      }
+
+      setSuccess(
+        "If an account exists for this email, a password reset link has been sent."
+      );
+      setPending(false);
+      return;
     }
 
     setPending(true);
@@ -160,21 +185,23 @@ export default function LoginPage() {
             />
           </div>
 
-          <div className="auth-field">
-            <label htmlFor="password" className="auth-label">
-              Password
-            </label>
-            <input
-              id="password"
-              type="password"
-              placeholder={mode === "signup" ? "At least 6 characters" : ""}
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              required
-              className="forum-input"
-              autoComplete={mode === "signin" ? "current-password" : "new-password"}
-            />
-          </div>
+          {mode !== "forgot" && (
+            <div className="auth-field">
+              <label htmlFor="password" className="auth-label">
+                Password
+              </label>
+              <input
+                id="password"
+                type="password"
+                placeholder={mode === "signup" ? "At least 6 characters" : ""}
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                required
+                className="forum-input"
+                autoComplete={mode === "signin" ? "current-password" : "new-password"}
+              />
+            </div>
+          )}
 
           {mode === "signup" && (
             <div className="auth-field">
@@ -194,6 +221,28 @@ export default function LoginPage() {
             </div>
           )}
 
+            {mode === "signin" && (
+              <button
+                type="button"
+                className="forum-link w-fit"
+                onClick={() => {
+                  setMode("forgot");
+                  setPassword("");
+                  setConfirmPassword("");
+                  setError(null);
+                  setSuccess(null);
+                }}
+              >
+                Forgot my password
+              </button>
+            )}
+
+            {mode === "forgot" && (
+              <p className="text-xs text-[var(--forum-text-muted)] m-0">
+                Enter your email and we&apos;ll send you a link to reset your password.
+              </p>
+            )}
+
           {error && <p className="auth-error">{error}</p>}
           {success && <p className="auth-success">{success}</p>}
 
@@ -204,10 +253,22 @@ export default function LoginPage() {
           >
             {pending
               ? "Please wait..."
+              : mode === "forgot"
+              ? "Send reset link"
               : mode === "signin"
               ? "Sign in"
               : "Create account"}
           </button>
+
+          {mode === "forgot" && (
+            <button
+              type="button"
+              className="forum-link w-fit"
+              onClick={() => switchMode("signin")}
+            >
+              Back to sign in
+            </button>
+          )}
         </form>
       </div>
     </main>

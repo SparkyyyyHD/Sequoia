@@ -3,6 +3,8 @@
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrthographicCamera } from '@react-three/drei';
 import { Bloom, EffectComposer, Noise, Vignette } from '@react-three/postprocessing';
+import { useRouter } from 'next/navigation';
+import { FORUM_CATEGORIES, type ForumCategorySlug } from '@/lib/forum';
 import { useRef, useState, useCallback, useEffect, useMemo, memo, type Dispatch, type SetStateAction } from 'react';
 import * as THREE from 'three';
 
@@ -39,153 +41,146 @@ interface NodeDef {
   size: number;
 }
 
+interface NodeTarget {
+  href: string;
+  skill: string;
+  levelLabel: string;
+  detail: string;
+  categorySlug: ForumCategorySlug | 'forum';
+  subsectionSlug: string | null;
+}
+
 function hash(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
 }
 
-const FAMILY_SHADES = [
-  ['#4fc3f7', '#29b6f6', '#81d4fa', '#b3e5fc', '#e1f5fe', '#e1f5fe'],
-  ['#81c784', '#66bb6a', '#a5d6a7', '#c8e6c9', '#e8f5e9', '#e8f5e9'],
-  ['#ff8a65', '#ff7043', '#ffab91', '#ffccbc', '#fbe9e7', '#fbe9e7'],
-];
 const SIZES = [0.28, 0.23, 0.21, 0.2, 0.19, 0.18, 0.18];
-const Y_STEP = 1.5;
-const TREE_W = 12;
-const MAX_DEPTH = 6;
-const MAX_NODES = 60;
+const Y_STEP = 1.35;
+const TREE_W = 19;
 // Z_SCALE defined above with other camera constants
 const Z_MAX_ACC = 5;
-/** Minimum edge-to-edge gap between sibling nodes in world units. */
-const NODE_GAP = 0.14;
+const SKILL_BASE_COLORS = ['#6ec5ff', '#7ad78f', '#ff9966', '#f7be4b', '#c79dff', '#4cd7c2', '#ff7ca2', '#9fd06f', '#73a1ff'];
 
-interface Frontier {
-  id: number;
-  xMin: number;
-  xMax: number;
-  family: number;
+const SKILL_LEVELS = ['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Level 6'];
+
+interface SkillPath {
+  skill: string;
+  categorySlug: ForumCategorySlug;
+  levels: Array<{
+    label: string;
+    href: string;
+    detail: string;
+    subsectionSlug: string | null;
+  }>;
 }
 
-function randomWeights(k: number, seed: number): number[] {
-  const w: number[] = [];
-  let s = 0;
-  for (let i = 0; i < k; i++) {
-    const t = 0.25 + hash(seed * 41 + i * 97) * 0.75;
-    w.push(t);
-    s += t;
+function buildSkillPaths(): SkillPath[] {
+  const paths: SkillPath[] = [];
+  for (const category of FORUM_CATEGORIES) {
+    if (category.slug === 'life-advice') {
+      paths.push({
+        skill: category.label,
+        categorySlug: category.slug,
+        levels: category.subsections.map((sub) => ({
+          label: sub.label,
+          href: `/forum/life-advice/${sub.slug}`,
+          detail: sub.description,
+          subsectionSlug: sub.slug,
+        })),
+      });
+      continue;
+    }
+
+    for (const sub of category.subsections) {
+      paths.push({
+        skill: sub.label,
+        categorySlug: category.slug,
+        levels: SKILL_LEVELS.map((levelLabel, li) => ({
+          label: levelLabel,
+          href: `/forum/technical-advice/${sub.slug}`,
+          detail: `${sub.description} Progress tier ${li + 1}.`,
+          subsectionSlug: sub.slug,
+        })),
+      });
+    }
   }
-  return w.map((t) => t / s);
+  return paths;
 }
 
-function splitRange(xMin: number, xMax: number, k: number, seed: number): [number, number][] {
-  const w = randomWeights(k, seed);
-  const out: [number, number][] = [];
-  let acc = xMin;
-  const span = xMax - xMin;
-  for (let i = 0; i < k; i++) {
-    const hi = acc + span * w[i];
-    out.push([acc, hi]);
-    acc = hi;
-  }
-  return out;
+const SKILL_PATHS = buildSkillPaths();
+
+function toneColor(hex: string, depth: number): string {
+  const c = new THREE.Color(hex);
+  const hsl = { h: 0, s: 0, l: 0 };
+  c.getHSL(hsl);
+  c.setHSL(hsl.h, THREE.MathUtils.clamp(hsl.s + 0.06, 0, 1), THREE.MathUtils.clamp(hsl.l + depth * 0.045, 0.25, 0.84));
+  return `#${c.getHexString()}`;
 }
 
-/**
- * Maximum children that fit in `slotWidth` without overlapping at the next depth level.
- * Slot must accommodate `nc` nodes each of diameter `2*sz` plus `NODE_GAP` between edges.
- */
-function maxChildrenInSlot(slotWidth: number, childDepth: number): number {
-  const sz = SIZES[Math.min(childDepth, SIZES.length - 1)];
-  return Math.max(0, Math.floor(slotWidth / (2 * sz + NODE_GAP)));
-}
-
-function childCountFor(depth: number, id: number, nodesSoFar: number, slotWidth: number): number {
-  if (depth >= MAX_DEPTH - 1) return 0;
-  if (nodesSoFar >= MAX_NODES - 1) return 0;
-  const maxFit = maxChildrenInSlot(slotWidth, depth + 1);
-  if (maxFit < 1) return 0;
-
-  const h = hash(id * 503 + depth * 131);
-  let c: number;
-  if (depth === 0) {
-    c = 2 + Math.floor(h * 3);
-  } else if (depth === 1) {
-    c = 1 + Math.floor(hash(id * 17 + 9) * 3);
-  } else {
-    c = 1 + Math.floor(h * 2.5);
-  }
-  const room = MAX_NODES - nodesSoFar - 1;
-  return Math.min(c, Math.min(maxFit, Math.max(0, room)));
-}
-
-function generateTree2D(): Omit<NodeDef, 'z'>[] {
+function buildLinearTree2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<number, NodeTarget> } {
   const nodes: Omit<NodeDef, 'z'>[] = [];
-  let nid = 0;
+  const targets: Record<number, NodeTarget> = {};
 
+  let id = 0;
+  const rootId = id++;
   nodes.push({
-    id: nid++,
+    id: rootId,
     parentId: null,
     depth: 0,
     family: -1,
     x: 0,
     y: 0,
     color: '#ffd54f',
-    size: SIZES[0],
+    size: 0.32,
   });
+  targets[rootId] = {
+    href: '/forum',
+    skill: 'Forum Root',
+    levelLabel: 'Root',
+    detail: 'Entry point for every skill forum path.',
+    categorySlug: 'forum',
+    subsectionSlug: null,
+  };
 
-  let frontier: Frontier[] = [
-    { id: 0, xMin: -TREE_W / 2, xMax: TREE_W / 2, family: -1 },
-  ];
+  const count = SKILL_PATHS.length;
+  const xStep = count > 1 ? TREE_W / (count - 1) : 0;
 
-  let childOrd = 0;
+  for (let pi = 0; pi < count; pi++) {
+    const path = SKILL_PATHS[pi];
+    const baseX = -TREE_W / 2 + pi * xStep;
+    let parentId = rootId;
 
-  while (frontier.length && nid < MAX_NODES) {
-    const next: Frontier[] = [];
-
-    for (let fi = 0; fi < frontier.length; fi++) {
-      const p = frontier[fi];
-      const parent = nodes[p.id];
-      const depth = parent.depth;
-      const slotWidth = p.xMax - p.xMin;
-      const nc = childCountFor(depth, p.id, nid, slotWidth);
-      if (nc <= 0) continue;
-
-      const ranges = splitRange(p.xMin, p.xMax, nc, p.id * 701 + depth * 13);
-
-      for (let c = 0; c < nc; c++) {
-        if (nid >= MAX_NODES) break;
-        const [xMin, xMax] = ranges[c];
-        const sz = SIZES[Math.min(depth + 1, SIZES.length - 1)];
-        // Jitter only within slack: space left after the node diameter and gap
-        const slack = Math.max(0, (xMax - xMin) - 2 * sz - NODE_GAP);
-        const jx = (hash(nid * 271 + 13) - 0.5) * slack * 0.5;
-        const jy = (hash(nid * 137 + 42) - 0.5) * 0.16;
-        const x = (xMin + xMax) / 2 + jx;
-        const y = (depth + 1) * Y_STEP + jy;
-        const family = depth === 0 ? childOrd : p.family;
-        const color = FAMILY_SHADES[family % 3][Math.min(depth, 5)];
-
-        const id = nid++;
-        nodes.push({
-          id,
-          parentId: p.id,
-          depth: depth + 1,
-          family,
-          x,
-          y,
-          color,
-          size: sz,
-        });
-        next.push({ id, xMin, xMax, family });
-        childOrd++;
-      }
+    for (let li = 0; li < path.levels.length; li++) {
+      const level = path.levels[li];
+      const nodeId = id++;
+      const curveOffset = (hash(pi * 97 + li * 7) - 0.5) * 0.24;
+      const drift = (pi - (count - 1) / 2) * 0.02 * li;
+      const x = baseX + curveOffset + drift;
+      const y = (li + 1) * Y_STEP;
+      nodes.push({
+        id: nodeId,
+        parentId,
+        depth: li + 1,
+        family: pi,
+        x,
+        y,
+        color: toneColor(SKILL_BASE_COLORS[pi % SKILL_BASE_COLORS.length], li),
+        size: SIZES[Math.min(li + 1, SIZES.length - 1)],
+      });
+      targets[nodeId] = {
+        href: level.href,
+        skill: path.skill,
+        levelLabel: level.label,
+        detail: level.detail,
+        categorySlug: path.categorySlug,
+        subsectionSlug: level.subsectionSlug,
+      };
+      parentId = nodeId;
     }
-
-    frontier = next;
-    if (!frontier.length) break;
   }
 
-  return nodes;
+  return { nodes, targets };
 }
 
 function liftZ(nodes: Omit<NodeDef, 'z'>[]): number[] {
@@ -209,13 +204,18 @@ function liftZ(nodes: Omit<NodeDef, 'z'>[]): number[] {
   return z;
 }
 
-function buildNodes(): NodeDef[] {
-  const base = generateTree2D();
+function buildNodes(): { nodes: NodeDef[]; targets: Record<number, NodeTarget> } {
+  const { nodes: base, targets } = buildLinearTree2D();
   const zs = liftZ(base);
-  return base.map((n, i) => ({ ...n, z: zs[i] }));
+  return {
+    nodes: base.map((n, i) => ({ ...n, z: zs[i] })),
+    targets,
+  };
 }
 
-const NODES = buildNodes();
+const TREE_DATA = buildNodes();
+const NODES = TREE_DATA.nodes;
+const NODE_TARGETS = TREE_DATA.targets;
 const POS: [number, number, number][] = NODES.map((n) => [n.x, n.y, n.z]);
 // Branch radii taper strongly with depth so deeper branches look thin/delicate
 const BR_R = [0.11, 0.072, 0.048, 0.032, 0.021, 0.014, 0.010];
@@ -912,6 +912,8 @@ interface OrthoSkillSceneProps {
   setViewState?: Dispatch<SetStateAction<ViewState>>;
   /** When true (default), camera tilt follows mouse to reveal Z depth via parallax. */
   enableTilt?: boolean;
+  onNodeHover?: (nodeId: number | null) => void;
+  onNodeActivate?: (nodeId: number) => void;
 }
 
 /**
@@ -919,7 +921,14 @@ interface OrthoSkillSceneProps {
  * Same mapping as `Layout2DOverlay` when both use the same world frustum + pixel dimensions.
  */
 function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
-  const { viewPixels, viewState: vsProp, setViewState: setVsProp, enableTilt = true } = props;
+  const {
+    viewPixels,
+    viewState: vsProp,
+    setViewState: setVsProp,
+    enableTilt = true,
+    onNodeHover,
+    onNodeActivate,
+  } = props;
   const { camera, gl, size } = useThree();
   const [internalVs, setInternalVs] = useState<ViewState>(DEFAULT_VIEW);
   const [hovered, setHovered] = useState<number | null>(null);
@@ -958,10 +967,11 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
   const handleHover = useCallback(
     (id: number | null) => {
       setHovered(id);
+      onNodeHover?.(id);
       if (ctrl.current.panDragging) return;
       gl.domElement.style.cursor = id !== null ? 'pointer' : 'grab';
     },
-    [gl],
+    [gl, onNodeHover],
   );
 
   useFrame(() => {
@@ -1132,6 +1142,8 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       const c = ctrl.current;
       const ne = e.nativeEvent;
       if (Math.hypot(ne.clientX - c.downX, ne.clientY - c.downY) > DRAG_THRESHOLD) return;
+      onNodeActivate?.(node.id);
+      if (onNodeActivate) return;
       if (vw <= 0 || vh <= 0) return;
       const b = orthoFrustumForViewport(vw, vh);
       const baseCx = (b.left + b.right) / 2;
@@ -1139,7 +1151,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       const targetZoom = Math.min(vsRef.current.zoom, NODE_CLICK_ZOOM);
       targetVsRef.current = { panX: node.x - baseCx, panY: node.y - baseCy, zoom: targetZoom };
     },
-    [vw, vh],
+    [vw, vh, onNodeActivate],
   );
 
   return (
@@ -1438,7 +1450,27 @@ function CompareSplitView({ onClose }: { onClose: () => void }) {
 }
 
 export default function SkillTreeV3() {
+  const router = useRouter();
   const [compare, setCompare] = useState(false);
+  const [activeNodeId, setActiveNodeId] = useState<number>(0);
+
+  const activeTarget = NODE_TARGETS[activeNodeId] ?? NODE_TARGETS[0];
+  const activeNode = NODES[activeNodeId] ?? NODES[0];
+
+  const handleNodeHover = useCallback((nodeId: number | null) => {
+    if (nodeId === null) return;
+    setActiveNodeId(nodeId);
+  }, []);
+
+  const handleNodeActivate = useCallback(
+    (nodeId: number) => {
+      const target = NODE_TARGETS[nodeId];
+      if (!target) return;
+      setActiveNodeId(nodeId);
+      router.push(target.href);
+    },
+    [router],
+  );
 
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: BACKGROUND_COLOR }}>
@@ -1469,8 +1501,35 @@ export default function SkillTreeV3() {
         <CompareSplitView onClose={() => setCompare(false)} />
       ) : (
         <Canvas gl={{ antialias: true }} style={{ width: '100%', height: '100%', background: BACKGROUND_COLOR }}>
-          <OrthoSkillScene />
+          <OrthoSkillScene onNodeHover={handleNodeHover} onNodeActivate={handleNodeActivate} />
         </Canvas>
+      )}
+
+      {!compare && (
+        <aside
+          style={{
+            position: 'absolute',
+            right: 12,
+            top: 12,
+            zIndex: 24,
+            width: 'min(360px, calc(100vw - 24px))',
+            background: 'rgba(15, 23, 42, 0.84)',
+            border: '1px solid rgba(148, 163, 184, 0.52)',
+            borderRadius: 10,
+            boxShadow: '0 12px 28px rgba(2, 6, 23, 0.35)',
+            color: '#e2e8f0',
+            backdropFilter: 'blur(7px)',
+            padding: '12px 12px 11px',
+          }}
+        >
+          <p style={{ margin: 0, fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#93c5fd' }}>
+            Node destination
+          </p>
+          <h3 style={{ margin: '4px 0 0', fontSize: 17, lineHeight: 1.2, color: '#f8fafc' }}>
+            {activeTarget.skill}
+          </h3>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#cbd5e1' }}>{activeTarget.detail}</p>
+        </aside>
       )}
     </div>
   );
