@@ -2,6 +2,7 @@
 
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrthographicCamera } from '@react-three/drei';
+import { Bloom, EffectComposer, Noise, Vignette } from '@react-three/postprocessing';
 import { useRef, useState, useCallback, useEffect, useMemo, memo, type Dispatch, type SetStateAction } from 'react';
 import * as THREE from 'three';
 
@@ -20,6 +21,9 @@ const LERP_ZOOM = 0.09;       // animation speed for click-to-zoom
 /** Horizon color — matches the sky/ground backdrop at the horizon line */
 const BACKGROUND_COLOR = '#c4d6d0';
 const FOG_COLOR = '#c4d6d0';
+const BLOOM_INTENSITY = 1.2;
+const BLOOM_RADIUS = 0.6;
+const BLOOM_THRESHOLD = 0.9;
 
 // ─── Tree generation (2D layout → z lift) ───────────────────
 
@@ -724,7 +728,8 @@ const SkillNode = memo(function SkillNode({
 }: SkillNodeProps) {
   const groupRef = useRef<THREE.Group>(null!);
   const matRef = useRef<THREE.MeshStandardMaterial>(null!);
-  const glowRef = useRef<THREE.MeshBasicMaterial>(null!);
+  const glowOuterRef = useRef<THREE.MeshBasicMaterial>(null!);
+  const glowInnerRef = useRef<THREE.MeshBasicMaterial>(null!);
 
   const baseColor = useMemo(() => new THREE.Color(node.color), [node.color]);
   const white = useMemo(() => new THREE.Color('#ffffff'), []);
@@ -756,8 +761,9 @@ const SkillNode = memo(function SkillNode({
   useFrame(() => {
     const grp = groupRef.current;
     const mat = matRef.current;
-    const glow = glowRef.current;
-    if (!grp || !mat || !glow) return;
+    const glowOuter = glowOuterRef.current;
+    const glowInner = glowInnerRef.current;
+    if (!grp || !mat || !glowOuter || !glowInner) return;
 
     grp.scale.setScalar(THREE.MathUtils.lerp(grp.scale.x, isHovered ? 1.3 : 1, 0.12));
     grp.rotation.z += 0.0018 * pulse;
@@ -766,21 +772,33 @@ const SkillNode = memo(function SkillNode({
     mat.emissive.lerp(isHovered ? baseColor : BLACK, 0.12);
     mat.emissiveIntensity = THREE.MathUtils.lerp(
       mat.emissiveIntensity,
-      isHovered ? 0.7 : 0.2,
+      isHovered ? 1.2 : 0.44,
       0.12,
     );
-    glow.opacity = THREE.MathUtils.lerp(glow.opacity, isHovered ? 0.3 : 0.08, 0.1);
+    glowOuter.opacity = THREE.MathUtils.lerp(glowOuter.opacity, isHovered ? 0.4 : 0.12, 0.1);
+    glowInner.opacity = THREE.MathUtils.lerp(glowInner.opacity, isHovered ? 0.55 : 0.2, 0.1);
   });
 
   return (
     <group ref={groupRef} position={pos}>
       <mesh>
-        {renderPolyGeometry(node.size * 1.58)}
+        {renderPolyGeometry(node.size * 2.1)}
         <meshBasicMaterial
-          ref={glowRef}
+          ref={glowOuterRef}
           color={node.color}
           transparent
-          opacity={0.08}
+          opacity={0.12}
+          blending={THREE.AdditiveBlending}
+          depthWrite={false}
+        />
+      </mesh>
+      <mesh>
+        {renderPolyGeometry(node.size * 1.52)}
+        <meshBasicMaterial
+          ref={glowInnerRef}
+          color={node.color}
+          transparent
+          opacity={0.2}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
         />
@@ -798,14 +816,66 @@ const SkillNode = memo(function SkillNode({
           ref={matRef}
           color={node.color}
           emissive={node.color}
-          emissiveIntensity={0.12}
-          roughness={0.3}
-          metalness={0.28}
+          emissiveIntensity={0.44}
+          roughness={0.22}
+          metalness={0.35}
         />
       </mesh>
     </group>
   );
 });
+
+function Fireflies() {
+  const pointsRef = useRef<THREE.Points>(null!);
+
+  const { positions, colors } = useMemo(() => {
+    const count = 140;
+    const pos = new Float32Array(count * 3);
+    const col = new Float32Array(count * 3);
+    for (let i = 0; i < count; i++) {
+      const t = i * 0.77 + 13;
+      const x = (hash(t * 11.7) - 0.5) * 17;
+      const y = 0.9 + hash(t * 7.3) * 11.5;
+      const z = -2.8 + hash(t * 19.9) * 7.4;
+      pos[i * 3] = x;
+      pos[i * 3 + 1] = y;
+      pos[i * 3 + 2] = z;
+
+      const warm = hash(t * 5.4);
+      const color = new THREE.Color().setHSL(0.12 + warm * 0.08, 0.86, 0.68 + warm * 0.14);
+      col[i * 3] = color.r;
+      col[i * 3 + 1] = color.g;
+      col[i * 3 + 2] = color.b;
+    }
+    return { positions: pos, colors: col };
+  }, []);
+
+  useFrame(({ clock }) => {
+    const pts = pointsRef.current;
+    if (!pts) return;
+    pts.rotation.y = Math.sin(clock.elapsedTime * 0.04) * 0.06;
+    const mat = pts.material as THREE.PointsMaterial;
+    mat.opacity = 0.34 + Math.sin(clock.elapsedTime * 1.15) * 0.08;
+  });
+
+  return (
+    <points ref={pointsRef}>
+      <bufferGeometry>
+        <bufferAttribute attach="attributes-position" args={[positions, 3]} />
+        <bufferAttribute attach="attributes-color" args={[colors, 3]} />
+      </bufferGeometry>
+      <pointsMaterial
+        size={0.19}
+        sizeAttenuation
+        vertexColors
+        transparent
+        opacity={0.34}
+        blending={THREE.AdditiveBlending}
+        depthWrite={false}
+      />
+    </points>
+  );
+}
 
 function TreeMeshes({
   hovered,
@@ -1098,6 +1168,19 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
 
       <BackgroundForest />
       <TreeMeshes hovered={hovered} onHover={handleHover} onNodeClick={onNodeClick} />
+      <Fireflies />
+
+      <EffectComposer>
+        <Bloom
+          intensity={BLOOM_INTENSITY}
+          radius={BLOOM_RADIUS}
+          mipmapBlur
+          luminanceThreshold={BLOOM_THRESHOLD}
+          luminanceSmoothing={0.65}
+        />
+        <Noise opacity={0.02} />
+        <Vignette eskil={false} offset={0.12} darkness={0.38} />
+      </EffectComposer>
     </>
   );
 }
