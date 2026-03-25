@@ -216,10 +216,110 @@ const POS: [number, number, number][] = NODES.map((n) => [n.x, n.y, n.z]);
 // Branch radii taper strongly with depth so deeper branches look thin/delicate
 const BR_R = [0.11, 0.072, 0.048, 0.032, 0.021, 0.014, 0.010];
 // Branch colors lighten with depth (darker near root, warmer at tips)
-const BR_C = ['#2c1a0e', '#3b2010', '#4e2f14', '#5d3a1a', '#6b4423', '#7a5233', '#8a6040'];
-// Roughness + metalness per depth level — near-root bark is rough, tips are smoother
-const BR_ROUGHNESS = [0.85, 0.80, 0.75, 0.70, 0.65, 0.60, 0.55];
+const BR_C = ['#5b341d', '#6a3e22', '#784a2c', '#85573a', '#93644a', '#a07157', '#ad7f66'];
+// Roughness + metalness per depth level — slightly smoother than before so bark catches more light
+const BR_ROUGHNESS = [0.72, 0.68, 0.64, 0.60, 0.57, 0.54, 0.52];
 const BR_METALNESS  = [0.05, 0.07, 0.09, 0.10, 0.11, 0.12, 0.12];
+
+interface BarkTextureSet {
+  color: THREE.CanvasTexture;
+  bump: THREE.CanvasTexture;
+  roughness: THREE.CanvasTexture;
+}
+
+let barkTextureCache: BarkTextureSet | null = null;
+
+function makeBarkTextures(): BarkTextureSet | null {
+  if (typeof document === 'undefined') return null;
+  if (barkTextureCache) return barkTextureCache;
+
+  const size = 256;
+
+  const mkCanvas = () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    return canvas;
+  };
+
+  const colorCanvas = mkCanvas();
+  const bumpCanvas = mkCanvas();
+  const roughCanvas = mkCanvas();
+
+  const cctx = colorCanvas.getContext('2d');
+  const bctx = bumpCanvas.getContext('2d');
+  const rctx = roughCanvas.getContext('2d');
+  if (!cctx || !bctx || !rctx) return null;
+
+  const grad = cctx.createLinearGradient(0, 0, 0, size);
+  grad.addColorStop(0, '#8c6648');
+  grad.addColorStop(0.45, '#9f7858');
+  grad.addColorStop(1, '#76553b');
+  cctx.fillStyle = grad;
+  cctx.fillRect(0, 0, size, size);
+
+  for (let x = 0; x < size; x += 3) {
+    const v = Math.floor(45 + hash(x * 13.1) * 55);
+    cctx.fillStyle = `rgba(${v + 62}, ${v + 34}, ${v + 10}, 0.2)`;
+    cctx.fillRect(x, 0, 1 + ((x / 3) % 2), size);
+  }
+
+  for (let i = 0; i < 320; i++) {
+    const x = Math.floor(hash(i * 71.3) * size);
+    const y = Math.floor(hash(i * 37.9) * size);
+    const r = 1 + Math.floor(hash(i * 11.7) * 3);
+    cctx.fillStyle = `rgba(56, 36, 24, ${0.04 + hash(i * 3.9) * 0.08})`;
+    cctx.beginPath();
+    cctx.arc(x, y, r, 0, Math.PI * 2);
+    cctx.fill();
+  }
+
+  const bumpImg = bctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const ridge = Math.sin((x / size) * Math.PI * 24) * 0.5 + 0.5;
+      const grain = hash(x * 17.2 + y * 9.7);
+      const v = Math.floor(80 + ridge * 90 + grain * 55);
+      bumpImg.data[i] = v;
+      bumpImg.data[i + 1] = v;
+      bumpImg.data[i + 2] = v;
+      bumpImg.data[i + 3] = 255;
+    }
+  }
+  bctx.putImageData(bumpImg, 0, 0);
+
+  const roughImg = rctx.createImageData(size, size);
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const i = (y * size + x) * 4;
+      const stripe = Math.sin((x / size) * Math.PI * 18) * 0.5 + 0.5;
+      const noise = hash(x * 5.1 + y * 13.7);
+      const v = Math.floor(120 + stripe * 80 + noise * 35);
+      roughImg.data[i] = v;
+      roughImg.data[i + 1] = v;
+      roughImg.data[i + 2] = v;
+      roughImg.data[i + 3] = 255;
+    }
+  }
+  rctx.putImageData(roughImg, 0, 0);
+
+  const color = new THREE.CanvasTexture(colorCanvas);
+  const bump = new THREE.CanvasTexture(bumpCanvas);
+  const roughness = new THREE.CanvasTexture(roughCanvas);
+
+  [color, bump, roughness].forEach((t) => {
+    t.wrapS = THREE.RepeatWrapping;
+    t.wrapT = THREE.RepeatWrapping;
+    t.repeat.set(1.1, 6.5);
+    t.needsUpdate = true;
+  });
+
+  color.colorSpace = THREE.SRGBColorSpace;
+
+  barkTextureCache = { color, bump, roughness };
+  return barkTextureCache;
+}
 
 const TREE_PAD = 0.85;
 
@@ -507,10 +607,21 @@ function BackgroundForest() {
 // ─── Trunk ──────────────────────────────────────────────────
 
 function Trunk() {
+  const bark = useMemo(() => makeBarkTextures(), []);
   return (
     <mesh position={[0, -0.4, -0.3]}>
       <cylinderGeometry args={[0.10, 0.21, 0.8, 10]} />
-      <meshStandardMaterial color="#1e0f08" roughness={0.78} metalness={0.06} />
+      <meshStandardMaterial
+        color="#6b4630"
+        map={bark?.color}
+        bumpMap={bark?.bump}
+        bumpScale={0.12}
+        roughnessMap={bark?.roughness}
+        roughness={0.66}
+        metalness={0.05}
+        emissive="#3a2517"
+        emissiveIntensity={0.1}
+      />
     </mesh>
   );
 }
@@ -522,32 +633,73 @@ const BranchTube = memo(function BranchTube({
   parent: NodeDef;
   child: NodeDef;
 }) {
-  const geometry = useMemo(() => {
+  const branch = useMemo(() => {
     const pz = parent.z - 0.15;
     const cz = child.z - 0.15;
     const s = new THREE.Vector3(parent.x, parent.y, pz);
     const e = new THREE.Vector3(child.x, child.y, cz);
-    const midX = (parent.x + child.x) / 2;
-    const midY = (parent.y + child.y) / 2;
     const midZ = (pz + cz) / 2;
-    const bulge = (hash(child.id * 59 + parent.id) - 0.5) * 0.55;
-    const cp = new THREE.Vector3(midX, midY, midZ + bulge);
-    const curve = new THREE.QuadraticBezierCurve3(s, cp, e);
+    const dir = e.clone().sub(s);
+    const dirN = dir.clone().normalize();
+    const side = new THREE.Vector3().crossVectors(dirN, new THREE.Vector3(0, 0, 1));
+    if (side.lengthSq() < 1e-5) side.set(1, 0, 0);
+    side.normalize();
+    const bend = (hash(child.id * 59 + parent.id) - 0.5) * 0.45;
+    const bulge = (hash(child.id * 97 + parent.id * 3) -  0.5) * 0.65;
+    const cp1 = s
+      .clone()
+      .lerp(e, 0.33)
+      .addScaledVector(side, bend)
+      .add(new THREE.Vector3(0, 0, bulge * 0.7 + (midZ - pz) * 0.2));
+    const cp2 = s
+      .clone()
+      .lerp(e, 0.67)
+      .addScaledVector(side, -bend * 0.75)
+      .add(new THREE.Vector3(0, 0, bulge));
+    const curve = new THREE.CubicBezierCurve3(s, cp1, cp2, e);
     const r = BR_R[Math.min(parent.depth, BR_R.length - 1)];
     // More radial segments on thick near-root branches so lighting curves look smooth
     const radialSegs = parent.depth < 2 ? 10 : parent.depth < 4 ? 7 : 5;
-    return new THREE.TubeGeometry(curve, 16, r, radialSegs, false);
+    const geometry = new THREE.TubeGeometry(curve, 22, r, radialSegs, false);
+    return { geometry };
   }, [parent, child]);
 
+  const bark = useMemo(() => makeBarkTextures(), []);
+
   const di = Math.min(parent.depth, BR_C.length - 1);
-  const color     = BR_C[di];
+  const color = useMemo(() => {
+    const c = new THREE.Color(BR_C[di]);
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    const hueJitter = (hash(child.id * 43 + parent.id * 17) - 0.5) * 0.045;
+    const satBoost = 0.05 + hash(child.id * 89) * 0.08;
+    const lightJitter = (hash(child.id * 131) - 0.5) * 0.12;
+    c.setHSL(
+      (hsl.h + hueJitter + 1) % 1,
+      THREE.MathUtils.clamp(hsl.s + satBoost, 0, 1),
+      THREE.MathUtils.clamp(hsl.l + lightJitter + 0.08, 0.30, 0.72),
+    );
+    return c;
+  }, [di, child.id, parent.id]);
   const roughness = BR_ROUGHNESS[di];
   const metalness = BR_METALNESS[di];
 
   return (
-    <mesh geometry={geometry}>
-      <meshStandardMaterial color={color} roughness={roughness} metalness={metalness} />
-    </mesh>
+    <group>
+      <mesh geometry={branch.geometry}>
+        <meshStandardMaterial
+          color={color}
+          map={bark?.color}
+          bumpMap={bark?.bump}
+          bumpScale={0.11}
+          roughnessMap={bark?.roughness}
+          roughness={roughness}
+          metalness={metalness}
+          emissive={color.clone().multiplyScalar(0.18)}
+          emissiveIntensity={0.12}
+        />
+      </mesh>
+    </group>
   );
 });
 
@@ -557,6 +709,10 @@ interface SkillNodeProps {
   isHovered: boolean;
   onHover: (id: number | null) => void;
   onClick: (node: NodeDef, e: ThreeEvent<MouseEvent>) => void;
+}
+
+function nodeShapeIndex(node: NodeDef): number {
+  return node.depth
 }
 
 const SkillNode = memo(function SkillNode({
@@ -572,6 +728,30 @@ const SkillNode = memo(function SkillNode({
 
   const baseColor = useMemo(() => new THREE.Color(node.color), [node.color]);
   const white = useMemo(() => new THREE.Color('#ffffff'), []);
+  const shape = useMemo(() => nodeShapeIndex(node), [node]);
+  const pulse = useMemo(() => 0.8 + hash(node.id * 17.3) * 1.2, [node.id]);
+  const tilt = useMemo(() => (hash(node.id * 41.7) - 0.5) * 0.45, [node.id]);
+  const initRotX = useMemo(() => Math.random() * Math.PI * 2, [node.id]);
+  const initRotY = useMemo(() => Math.random() * Math.PI * 2, [node.id]);
+  const initRotZ = useMemo(() => Math.random() * Math.PI * 2, [node.id]);
+
+  const renderPolyGeometry = useCallback(
+    (radius: number) => {
+      if (shape === 0) return <icosahedronGeometry args={[radius * 1.5, 0]} />;
+      if (shape === 1) return <dodecahedronGeometry args={[radius * 1.5, 0]} />;
+      if(shape === 2) return <octahedronGeometry args={[radius * 1.5, 0]} />;
+      if(shape === 3) return <boxGeometry args={[radius * 1.5, radius * 1.5, radius * 1.5]} />;
+      return <tetrahedronGeometry args={[radius * 1.5, 0]} />;
+    },
+    [shape],
+  );
+
+  useEffect(() => {
+    if (!groupRef.current) return;
+    groupRef.current.rotation.x = initRotX;
+    groupRef.current.rotation.y = initRotY;
+    groupRef.current.rotation.z += initRotZ;
+  }, [initRotX, initRotY, initRotZ]);
 
   useFrame(() => {
     const grp = groupRef.current;
@@ -580,6 +760,8 @@ const SkillNode = memo(function SkillNode({
     if (!grp || !mat || !glow) return;
 
     grp.scale.setScalar(THREE.MathUtils.lerp(grp.scale.x, isHovered ? 1.3 : 1, 0.12));
+    grp.rotation.z += 0.0018 * pulse;
+    grp.rotation.x = THREE.MathUtils.lerp(grp.rotation.x, tilt, 0.04);
     mat.color.lerp(isHovered ? white : baseColor, 0.12);
     mat.emissive.lerp(isHovered ? baseColor : BLACK, 0.12);
     mat.emissiveIntensity = THREE.MathUtils.lerp(
@@ -593,7 +775,7 @@ const SkillNode = memo(function SkillNode({
   return (
     <group ref={groupRef} position={pos}>
       <mesh>
-        <sphereGeometry args={[node.size * 1.4, 12, 12]} />
+        {renderPolyGeometry(node.size * 1.58)}
         <meshBasicMaterial
           ref={glowRef}
           color={node.color}
@@ -611,14 +793,14 @@ const SkillNode = memo(function SkillNode({
         onPointerOut={() => onHover(null)}
         onClick={(e) => onClick(node, e)}
       >
-        <sphereGeometry args={[node.size, 16, 16]} />
+        {renderPolyGeometry(node.size)}
         <meshStandardMaterial
           ref={matRef}
           color={node.color}
           emissive={node.color}
           emissiveIntensity={0.12}
-          roughness={0.38}
-          metalness={0.18}
+          roughness={0.3}
+          metalness={0.28}
         />
       </mesh>
     </group>
@@ -897,16 +1079,22 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
 
       <fog attach="fog" args={[FOG_COLOR, 24, 78]} />
 
-      {/* Low ambient so unlit sides of branches stay visibly dark */}
-      <ambientLight intensity={0.18} />
+      {/* Lift base exposure so bark colors stay visible and do not collapse to near-black */}
+      <ambientLight intensity={0.42} />
+      <hemisphereLight args={['#deecf2', '#9a8067', 0.56]} />
       {/* Strong key from upper-left-front — primary bark highlights */}
-      <directionalLight position={[-6, 14, 12]} intensity={1.6} color="#fff8f0" />
+      <directionalLight position={[-6, 14, 12]} intensity={1.35} color="#fff6ea" />
       {/* Cool rim from upper-right-back — separates branches from sky */}
-      <directionalLight position={[8, 10, -4]} intensity={0.55} color="#b8d4e8" />
+      <directionalLight position={[8, 10, -4]} intensity={0.82} color="#c7dded" />
+      {/* Soft front fill aimed from camera side to prevent silhouette-black branch segments */}
+      <directionalLight position={[0, 4, 18]} intensity={0.75} color="#ffe7d2" />
       {/* Warm bounce from below (ground reflection) */}
-      <pointLight position={[0, -0.5, 5]} intensity={0.9} color="#c8a86a" distance={22} decay={2} />
+      <pointLight position={[0, -0.5, 5]} intensity={1.05} color="#d8b27a" distance={24} decay={2} />
       {/* Soft sky fill from above */}
-      <pointLight position={[0, 16, 6]} intensity={0.45} color="#a8c8d8" distance={30} decay={2} />
+      <pointLight position={[0, 16, 6]} intensity={0.62} color="#c5dbe6" distance={32} decay={2} />
+      {/* Side fill to keep far-left and far-right limbs from clipping into deep shadow */}
+      <pointLight position={[-14, 7, 4]} intensity={0.42} color="#e7c6a6" distance={38} decay={2} />
+      <pointLight position={[14, 7, 4]} intensity={0.42} color="#e7c6a6" distance={38} decay={2} />
 
       <BackgroundForest />
       <TreeMeshes hovered={hovered} onHover={handleHover} onNodeClick={onNodeClick} />
