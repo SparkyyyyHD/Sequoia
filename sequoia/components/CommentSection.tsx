@@ -1,11 +1,14 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateVoterKey } from "@/lib/voterKey";
 import { fetchComments, type Comment } from "@/lib/comments";
+import { useAuth } from "@/components/AuthProvider";
 
 export default function CommentSection({ postId }: { postId: string }) {
+  const { user, displayName } = useAuth();
   const [comments, setComments] = useState<Comment[]>([]);
   const [myLikes, setMyLikes] = useState<Set<string>>(new Set());
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
@@ -61,14 +64,13 @@ export default function CommentSection({ postId }: { postId: string }) {
 
   async function submitComment(
     content: string,
-    authorName: string,
     parentId: string | null
   ): Promise<string | null> {
     const { error } = await supabase.from("comments").insert({
       post_id: postId,
       parent_id: parentId,
       content: content.trim(),
-      author_name: authorName.trim() || null,
+      author_name: displayName,
     });
     if (error) return error.message;
     await load();
@@ -101,8 +103,10 @@ export default function CommentSection({ postId }: { postId: string }) {
             liked={myLikes.has(comment.id)}
             likeCount={likeCounts[comment.id] ?? 0}
             onLike={() => toggleLike(comment.id)}
-            onReply={() =>
-              setReplyingTo(replyingTo === comment.id ? null : comment.id)
+            onReply={
+              user
+                ? () => setReplyingTo(replyingTo === comment.id ? null : comment.id)
+                : undefined
             }
             replyActive={replyingTo === comment.id}
           />
@@ -121,12 +125,13 @@ export default function CommentSection({ postId }: { postId: string }) {
             </div>
           )}
 
-          {replyingTo === comment.id && (
+          {replyingTo === comment.id && user && (
             <div className="comment-reply-form">
               <InlineCommentForm
                 placeholder={`Reply to ${comment.author_name ?? "Anonymous"}...`}
-                onSubmit={(c, a) => submitComment(c, a, comment.id)}
+                onSubmit={(c) => submitComment(c, comment.id)}
                 onCancel={() => setReplyingTo(null)}
+                displayName={displayName}
               />
             </div>
           )}
@@ -134,10 +139,20 @@ export default function CommentSection({ postId }: { postId: string }) {
       ))}
 
       <div className="comment-add-form">
-        <InlineCommentForm
-          placeholder="Add a comment..."
-          onSubmit={(c, a) => submitComment(c, a, null)}
-        />
+        {user ? (
+          <InlineCommentForm
+            placeholder="Add a comment..."
+            onSubmit={(c) => submitComment(c, null)}
+            displayName={displayName}
+          />
+        ) : (
+          <p className="text-xs text-[var(--forum-text-muted)]">
+            <Link href="/login" className="forum-link font-semibold">
+              Sign in
+            </Link>{" "}
+            to leave a comment.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -193,13 +208,14 @@ function InlineCommentForm({
   placeholder,
   onSubmit,
   onCancel,
+  displayName,
 }: {
   placeholder: string;
-  onSubmit: (content: string, author: string) => Promise<string | null>;
+  onSubmit: (content: string) => Promise<string | null>;
   onCancel?: () => void;
+  displayName: string | null;
 }) {
   const [content, setContent] = useState("");
-  const [author, setAuthor] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -207,7 +223,7 @@ function InlineCommentForm({
     e.preventDefault();
     if (!content.trim()) return;
     setPending(true);
-    const err = await onSubmit(content, author);
+    const err = await onSubmit(content);
     setPending(false);
     if (err) { setError(err); return; }
     setContent("");
@@ -216,14 +232,15 @@ function InlineCommentForm({
 
   return (
     <form onSubmit={handleSubmit} className="comment-form">
+      {displayName && (
+        <p className="text-xs text-[var(--forum-text-muted)] mb-1">
+          Commenting as{" "}
+          <span className="font-medium text-[var(--forum-text-secondary)]">
+            {displayName}
+          </span>
+        </p>
+      )}
       <div className="comment-form-inputs">
-        <input
-          type="text"
-          placeholder="Name (optional)"
-          value={author}
-          onChange={(e) => setAuthor(e.target.value)}
-          className="forum-input comment-form-name"
-        />
         <textarea
           placeholder={placeholder}
           value={content}
