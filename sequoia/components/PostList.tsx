@@ -1,41 +1,126 @@
-interface Post {
-  id: string;
-  content: string;
-  author_name: string | null;
-  created_at: string;
-}
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
+import { supabase } from "@/lib/supabase";
+import { getOrCreateVoterKey } from "@/lib/voterKey";
+import { getSubsectionLabel, type ForumCategorySlug } from "@/lib/forum";
+import type { Post } from "@/lib/postTypes";
+import PostVoteBar from "@/components/PostVoteBar";
+import CommentSection from "@/components/CommentSection";
+import ShareButton from "@/components/ShareButton";
 
 interface PostListProps {
   posts: Post[];
+  showSubsectionLink?: boolean;
 }
 
-export default function PostList({ posts }: PostListProps) {
+export default function PostList({ posts, showSubsectionLink }: PostListProps) {
+  const [myVotes, setMyVotes] = useState<Record<string, 1 | -1>>({});
+  const [openComments, setOpenComments] = useState<Set<string>>(new Set());
+  const idsKey = useMemo(() => posts.map((p) => p.id).sort().join(","), [posts]);
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      const key = getOrCreateVoterKey();
+      if (!key || posts.length === 0) return;
+      const ids = posts.map((p) => p.id);
+      const { data } = await supabase.rpc("get_my_votes_for_posts", {
+        p_voter_key: key,
+        p_post_ids: ids,
+      });
+      if (cancelled || !data) return;
+      const next: Record<string, 1 | -1> = {};
+      for (const row of data as { post_id: string; vote: number }[]) {
+        next[row.post_id] = row.vote as 1 | -1;
+      }
+      setMyVotes(next);
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [idsKey, posts.length]);
+
+  function handleMyVoteUpdate(postId: string, vote: 1 | -1 | null) {
+    setMyVotes((prev) => {
+      const copy = { ...prev };
+      if (vote === null) delete copy[postId];
+      else copy[postId] = vote;
+      return copy;
+    });
+  }
+
+  function toggleComments(postId: string) {
+    setOpenComments((prev) => {
+      const next = new Set(prev);
+      next.has(postId) ? next.delete(postId) : next.add(postId);
+      return next;
+    });
+  }
+
   if (posts.length === 0) {
     return (
-      <p className="mt-4 text-sm text-neutral-500">
-        No posts yet. Be the first to share some advice!
-      </p>
+      <p className="mt-3 text-sm text-[var(--forum-text-muted)]">No posts to show.</p>
     );
   }
 
   return (
-    <ul className="mt-4 space-y-4">
-      {posts.map((post) => (
-        <li
-          key={post.id}
-          className="rounded-md border border-neutral-200 p-4 dark:border-neutral-800"
-        >
-          <p className="whitespace-pre-wrap text-sm">{post.content}</p>
-          <p className="mt-2 text-xs text-neutral-500">
-            {post.author_name ?? "Anonymous"} &middot;{" "}
-            {new Date(post.created_at).toLocaleDateString(undefined, {
-              year: "numeric",
-              month: "short",
-              day: "numeric",
-            })}
-          </p>
-        </li>
-      ))}
+    <ul className="mt-2 space-y-2">
+      {posts.map((post) => {
+        const cat = post.category;
+        const sub = post.subcategory;
+        const subsectionLabel =
+          cat && sub ? getSubsectionLabel(cat as ForumCategorySlug, sub) : null;
+        const subsectionHref = cat && sub ? `/forum/${cat}/${sub}` : null;
+        const commentsOpen = openComments.has(post.id);
+
+        return (
+          <li key={post.id} id={`post-${post.id}`} className="forum-card p-3 sm:p-4">
+            {showSubsectionLink && subsectionHref && subsectionLabel && (
+              <p className="mb-1.5 text-xs text-[var(--forum-text-muted)]">
+                <Link href={subsectionHref} className="forum-link">
+                  {cat === "life-advice" ? "Life advice" : "Technical advice"} &middot; {subsectionLabel}
+                </Link>
+              </p>
+            )}
+            <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--forum-text-primary)]">
+              {post.content}
+            </p>
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--forum-text-muted)]">
+              <span>{post.author_name ?? "Anonymous"}</span>
+              <span>
+                {new Date(post.created_at).toLocaleDateString(undefined, {
+                  month: "short",
+                  day: "numeric",
+                  year: "numeric",
+                })}
+              </span>
+            </div>
+            <PostVoteBar
+              postId={post.id}
+              helpfulCount={post.helpful_count ?? 0}
+              notHelpfulCount={post.not_helpful_count ?? 0}
+              myVote={myVotes[post.id]}
+              onMyVoteUpdate={handleMyVoteUpdate}
+            />
+            <div className="post-actions">
+              <button
+                type="button"
+                onClick={() => toggleComments(post.id)}
+                className={`post-action-btn${commentsOpen ? " post-action-btn--active" : ""}`}
+              >
+                Comments
+              </button>
+              <ShareButton postId={post.id} />
+            </div>
+            {commentsOpen && (
+              <div className="mt-3 border-t border-[var(--forum-border)] pt-3">
+                <CommentSection postId={post.id} />
+              </div>
+            )}
+          </li>
+        );
+      })}
     </ul>
   );
 }
