@@ -1509,8 +1509,9 @@ export default function SkillTreeV3() {
         <aside
           style={{
             position: 'absolute',
-            right: 12,
-            top: 12,
+            left: '92%',
+            bottom:"-3%",
+            transform: 'translate(-50%, -50%)',
             zIndex: 24,
             width: 'min(360px, calc(100vw - 24px))',
             background: 'rgba(15, 23, 42, 0.84)',
