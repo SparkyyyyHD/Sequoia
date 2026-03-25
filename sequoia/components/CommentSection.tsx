@@ -153,7 +153,7 @@ export default function CommentSection({ postId }: { postId: string }) {
             </Link>{" "}
             or{" "}
             <Link href="/login" className="forum-link font-semibold">
-              play as guest
+              post as a guest
             </Link>{" "}
             to leave a comment.
           </p>

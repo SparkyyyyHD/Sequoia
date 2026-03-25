@@ -28,7 +28,7 @@ export default function PostForm({ category, subcategory }: PostFormProps) {
         </Link>{" "}
         or{" "}
         <Link href="/login" className="forum-link font-semibold">
-          play as guest
+          post as a guest
         </Link>{" "}
         to leave a post.
       </div>
