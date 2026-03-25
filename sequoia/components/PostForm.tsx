@@ -13,18 +13,22 @@ interface PostFormProps {
 
 export default function PostForm({ category, subcategory }: PostFormProps) {
   const router = useRouter();
-  const { user, displayName, loading } = useAuth();
+  const { user, displayName, loading, isGuest } = useAuth();
   const [content, setContent] = useState("");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
 
   if (loading) return null;
 
-  if (!user) {
+  if (!user && !isGuest) {
     return (
       <div className="forum-card mt-4 p-4 text-sm text-[var(--forum-text-secondary)]">
         <Link href="/login" className="forum-link font-semibold">
           Sign in
+        </Link>{" "}
+        or{" "}
+        <Link href="/login" className="forum-link font-semibold">
+          play as guest
         </Link>{" "}
         to leave a post.
       </div>

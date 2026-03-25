@@ -7,7 +7,7 @@ import { useAuth } from "@/components/AuthProvider";
 
 export default function Navbar() {
   const router = useRouter();
-  const { user, displayName, signOut } = useAuth();
+  const { user, displayName, isGuest, signOut } = useAuth();
 
   async function handleSignOut() {
     await signOut();
@@ -30,9 +30,16 @@ export default function Navbar() {
         </Link>
 
         <div className="navbar-auth">
-          {user ? (
+          {user || isGuest ? (
             <>
-              <span className="navbar-user">{displayName}</span>
+              <span className="navbar-user">
+                {displayName}
+                {isGuest && (
+                  <span className="text-[var(--forum-text-muted)] text-xs ml-1">
+                    (guest)
+                  </span>
+                )}
+              </span>
               <button
                 type="button"
                 onClick={handleSignOut}

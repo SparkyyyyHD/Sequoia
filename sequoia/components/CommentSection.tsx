@@ -8,7 +8,8 @@ import { fetchComments, type Comment } from "@/lib/comments";
 import { useAuth } from "@/components/AuthProvider";
 
 export default function CommentSection({ postId }: { postId: string }) {
-  const { user, displayName } = useAuth();
+  const { user, displayName, isGuest } = useAuth();
+  const canComment = !!user || isGuest;
   const [comments, setComments] = useState<Comment[]>([]);
   const [myLikes, setMyLikes] = useState<Set<string>>(new Set());
   const [likeCounts, setLikeCounts] = useState<Record<string, number>>({});
@@ -104,7 +105,7 @@ export default function CommentSection({ postId }: { postId: string }) {
             likeCount={likeCounts[comment.id] ?? 0}
             onLike={() => toggleLike(comment.id)}
             onReply={
-              user
+              canComment
                 ? () => setReplyingTo(replyingTo === comment.id ? null : comment.id)
                 : undefined
             }
@@ -125,7 +126,7 @@ export default function CommentSection({ postId }: { postId: string }) {
             </div>
           )}
 
-          {replyingTo === comment.id && user && (
+          {replyingTo === comment.id && canComment && (
             <div className="comment-reply-form">
               <InlineCommentForm
                 placeholder={`Reply to ${comment.author_name ?? "Anonymous"}...`}
@@ -139,7 +140,7 @@ export default function CommentSection({ postId }: { postId: string }) {
       ))}
 
       <div className="comment-add-form">
-        {user ? (
+        {canComment ? (
           <InlineCommentForm
             placeholder="Add a comment..."
             onSubmit={(c) => submitComment(c, null)}
@@ -149,6 +150,10 @@ export default function CommentSection({ postId }: { postId: string }) {
           <p className="text-xs text-[var(--forum-text-muted)]">
             <Link href="/login" className="forum-link font-semibold">
               Sign in
+            </Link>{" "}
+            or{" "}
+            <Link href="/login" className="forum-link font-semibold">
+              play as guest
             </Link>{" "}
             to leave a comment.
           </p>
