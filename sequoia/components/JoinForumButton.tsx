@@ -20,8 +20,7 @@ export default function JoinForumButton({
   category,
   subsection,
 }: JoinForumButtonProps) {
-  // Only allow joining technical-advice if subsection is a tier (contains __)
-  // Only allow joining life-advice if subsection is a valid group (not empty)
+  // Technical join only for a specific skill node (field__skill). Life: any non-empty skill slug.
   if (
     (category === "technical-advice" && !subsection.includes("__")) ||
     (category === "life-advice" && !subsection)

@@ -4,7 +4,15 @@ import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrthographicCamera } from '@react-three/drei';
 import { Bloom, EffectComposer, Noise, Vignette } from '@react-three/postprocessing';
 import { useRouter } from 'next/navigation';
-import { FORUM_CATEGORIES, SKILL_TIERS, buildTechnicalTierSubsection, type ForumCategorySlug } from '@/lib/forum';
+import { FORUM_CATEGORIES, type ForumCategorySlug } from '@/lib/forum';
+import {
+  TECHNICAL_FIELD_SLUGS,
+  TECHNICAL_SKILL_TREES,
+  LIFE_SKILL_PILLARS,
+  topoSortSkillTree,
+  buildTechnicalSkillSubsection,
+  type TechnicalFieldSlug,
+} from '@/lib/skillTrees';
 import { useRef, useState, useCallback, useEffect, useMemo, memo, type Dispatch, type SetStateAction } from 'react';
 import * as THREE from 'three';
 
@@ -43,8 +51,10 @@ interface NodeDef {
 
 interface NodeTarget {
   href: string;
+  /** Category or field title (e.g. “Life advice”, “Fishing”). */
   skill: string;
-  levelLabel: string;
+  /** Specific node label (skill name or “Overview”, “Field hub”). */
+  nodeLabel: string;
   detail: string;
   categorySlug: ForumCategorySlug | 'forum';
   subsectionSlug: string | null;
@@ -56,57 +66,15 @@ function hash(n: number): number {
 }
 
 const SIZES = [0.28, 0.23, 0.21, 0.2, 0.19, 0.18, 0.18];
-const Y_STEP = 1.35;
-const TREE_W = 19;
+const Y_STEP = 1.7;
+const MIN_SUBTREE_SPAN = 0.58;
+const ROOT_CLUSTER_GAP = 0.22;
+const CHILD_CLUSTER_GAP = 0.1;
+const CHILD_CLUSTER_DEPTH_GAIN = 0.03;
+const HORIZONTAL_PACK_SCALE = 0.64;
 // Z_SCALE defined above with other camera constants
 const Z_MAX_ACC = 5;
 const SKILL_BASE_COLORS = ['#6ec5ff', '#7ad78f', '#ff9966', '#f7be4b', '#c79dff', '#4cd7c2', '#ff7ca2', '#9fd06f', '#73a1ff'];
-
-interface SkillPath {
-  skill: string;
-  categorySlug: ForumCategorySlug;
-  levels: Array<{
-    label: string;
-    href: string;
-    detail: string;
-    subsectionSlug: string | null;
-  }>;
-}
-
-function buildSkillPaths(): SkillPath[] {
-  const paths: SkillPath[] = [];
-  for (const category of FORUM_CATEGORIES) {
-    if (category.slug === 'life-advice') {
-      paths.push({
-        skill: category.label,
-        categorySlug: category.slug,
-        levels: category.subsections.map((sub) => ({
-          label: sub.label,
-          href: `/forum/life-advice/${sub.slug}`,
-          detail: sub.description,
-          subsectionSlug: sub.slug,
-        })),
-      });
-      continue;
-    }
-
-    for (const sub of category.subsections) {
-      paths.push({
-        skill: sub.label,
-        categorySlug: category.slug,
-        levels: SKILL_TIERS.map((tier) => ({
-          label: tier.label,
-          href: `/forum/technical-advice/${sub.slug}/${tier.slug}`,
-          detail: `${sub.description} ${tier.description}`,
-          subsectionSlug: buildTechnicalTierSubsection(sub.slug, tier.slug),
-        })),
-      });
-    }
-  }
-  return paths;
-}
-
-const SKILL_PATHS = buildSkillPaths();
 
 function toneColor(hex: string, depth: number): string {
   const c = new THREE.Color(hex);
@@ -116,66 +84,255 @@ function toneColor(hex: string, depth: number): string {
   return `#${c.getHexString()}`;
 }
 
-function buildLinearTree2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<number, NodeTarget> } {
+/**
+ * When a skill lists several prerequisites, we attach the 3D branch to the deepest
+ * one so parallel tracks visually merge instead of looking like one straight spine.
+ */
+function hubParentAndDepth(
+  requires: string[],
+  slugToId: Map<string, number>,
+  slugDepth: Map<string, number>,
+  hubId: number,
+): { parentId: number; depth: number } {
+  if (requires.length === 0) return { parentId: hubId, depth: 1 };
+  let parentId = hubId;
+  let maxD = 0;
+  for (const r of requires) {
+    const id = slugToId.get(r);
+    if (id === undefined) continue;
+    const d = slugDepth.get(r) ?? 1;
+    if (d > maxD) {
+      maxD = d;
+      parentId = id;
+    }
+  }
+  return { parentId, depth: maxD + 1 };
+}
+
+function buildSkillForest2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<number, NodeTarget> } {
   const nodes: Omit<NodeDef, 'z'>[] = [];
   const targets: Record<number, NodeTarget> = {};
+  const childrenByParent = new Map<number, number[]>();
 
-  let id = 0;
-  const rootId = id++;
-  nodes.push({
-    id: rootId,
-    parentId: null,
-    depth: 0,
-    family: -1,
-    x: 0,
-    y: 0,
-    color: '#ffd54f',
-    size: 0.32,
-  });
-  targets[rootId] = {
-    href: '/forum',
-    skill: 'Forum Root',
-    levelLabel: 'Root',
-    detail: 'Entry point for every skill forum path.',
-    categorySlug: 'forum',
-    subsectionSlug: null,
-  };
-
-  const count = SKILL_PATHS.length;
-  const xStep = count > 1 ? TREE_W / (count - 1) : 0;
-
-  for (let pi = 0; pi < count; pi++) {
-    const path = SKILL_PATHS[pi];
-    const baseX = -TREE_W / 2 + pi * xStep;
-    let parentId = rootId;
-
-    for (let li = 0; li < path.levels.length; li++) {
-      const level = path.levels[li];
-      const nodeId = id++;
-      const curveOffset = (hash(pi * 97 + li * 7) - 0.5) * 0.24;
-      const drift = (pi - (count - 1) / 2) * 0.02 * li;
-      const x = baseX + curveOffset + drift;
-      const y = (li + 1) * Y_STEP;
-      nodes.push({
-        id: nodeId,
-        parentId,
-        depth: li + 1,
-        family: pi,
-        x,
-        y,
-        color: toneColor(SKILL_BASE_COLORS[pi % SKILL_BASE_COLORS.length], li),
-        size: SIZES[Math.min(li + 1, SIZES.length - 1)],
-      });
-      targets[nodeId] = {
-        href: level.href,
-        skill: path.skill,
-        levelLabel: level.label,
-        detail: level.detail,
-        categorySlug: path.categorySlug,
-        subsectionSlug: level.subsectionSlug,
-      };
-      parentId = nodeId;
+  function addNode(
+    parentId: number | null,
+    family: number,
+    x: number,
+    y: number,
+    depth: number,
+    color: string,
+    size: number,
+    target: NodeTarget,
+  ): number {
+    const id = nodes.length;
+    nodes.push({
+      id,
+      parentId,
+      depth,
+      family,
+      x,
+      y,
+      color,
+      size,
+    });
+    targets[id] = target;
+    if (parentId !== null) {
+      const arr = childrenByParent.get(parentId) ?? [];
+      arr.push(id);
+      childrenByParent.set(parentId, arr);
     }
+    return id;
+  }
+
+  const rootId = addNode(
+    null,
+    -1,
+    0,
+    0,
+    0,
+    '#ffd54f',
+    0.32,
+    {
+      href: '/forum',
+      skill: 'Forum',
+      nodeLabel: 'Root',
+      detail: 'Entry point for every skill forum path.',
+      categorySlug: 'forum',
+      subsectionSlug: null,
+    },
+  );
+
+  for (let pi = 0; pi < LIFE_SKILL_PILLARS.length; pi++) {
+    const pillar = LIFE_SKILL_PILLARS[pi];
+    const pillarFamily = pi;
+    const pillarHubId = addNode(
+      rootId,
+      pillarFamily,
+      0,
+      Y_STEP,
+      1,
+      toneColor(SKILL_BASE_COLORS[pillarFamily % SKILL_BASE_COLORS.length], 0),
+      SIZES[1],
+      {
+        href: '/forum/life-advice',
+        skill: 'Life advice',
+        nodeLabel: pillar.label,
+        detail: pillar.description,
+        categorySlug: 'life-advice',
+        subsectionSlug: null,
+      },
+    );
+
+    const lifeOrder = topoSortSkillTree(pillar.nodes);
+    const lifeSlugToId = new Map<string, number>();
+    const lifeSlugDepth = new Map<string, number>();
+
+    for (const n of lifeOrder) {
+      const { parentId, depth: d } = hubParentAndDepth(n.requires, lifeSlugToId, lifeSlugDepth, pillarHubId);
+      lifeSlugDepth.set(n.slug, d);
+      const nid = addNode(
+        parentId,
+        pillarFamily,
+        0,
+        0,
+        0,
+        toneColor(SKILL_BASE_COLORS[pillarFamily % SKILL_BASE_COLORS.length], Math.min(d, 5)),
+        SIZES[Math.min(d, SIZES.length - 1)],
+        {
+          href: `/forum/life-advice/${n.slug}`,
+          skill: pillar.label,
+          nodeLabel: n.label,
+          detail: n.description,
+          categorySlug: 'life-advice',
+          subsectionSlug: n.slug,
+        },
+      );
+      lifeSlugToId.set(n.slug, nid);
+    }
+  }
+
+  const techCat = FORUM_CATEGORIES.find((c) => c.slug === 'technical-advice')!;
+  const techFamilyOffset = LIFE_SKILL_PILLARS.length;
+  for (let fi = 0; fi < TECHNICAL_FIELD_SLUGS.length; fi++) {
+    const field = TECHNICAL_FIELD_SLUGS[fi];
+    const fieldSub = techCat.subsections.find((s) => s.slug === field)!;
+    const fieldFamily = techFamilyOffset + fi;
+    const fieldNodeId = addNode(
+      rootId,
+      fieldFamily,
+      0,
+      Y_STEP,
+      1,
+      toneColor(SKILL_BASE_COLORS[fieldFamily % SKILL_BASE_COLORS.length], 0),
+      SIZES[1],
+      {
+        href: `/forum/technical-advice/${field}`,
+        skill: fieldSub.label,
+        nodeLabel: 'Field hub',
+        detail: fieldSub.description,
+        categorySlug: 'technical-advice',
+        subsectionSlug: field,
+      },
+    );
+
+    const order = topoSortSkillTree(TECHNICAL_SKILL_TREES[field as TechnicalFieldSlug]);
+    const slugToId = new Map<string, number>();
+    const slugDepth = new Map<string, number>();
+
+    for (const n of order) {
+      const { parentId, depth: d } = hubParentAndDepth(n.requires, slugToId, slugDepth, fieldNodeId);
+      slugDepth.set(n.slug, d);
+      const nid = addNode(
+        parentId,
+        fieldFamily,
+        0,
+        0,
+        0,
+        toneColor(SKILL_BASE_COLORS[fieldFamily % SKILL_BASE_COLORS.length], Math.min(d, 5)),
+        SIZES[Math.min(d, SIZES.length - 1)],
+        {
+          href: `/forum/technical-advice/${field}/${n.slug}`,
+          skill: fieldSub.label,
+          nodeLabel: n.label,
+          detail: n.description,
+          categorySlug: 'technical-advice',
+          subsectionSlug: buildTechnicalSkillSubsection(field, n.slug),
+        },
+      );
+      slugToId.set(n.slug, nid);
+    }
+  }
+
+  const queue = [rootId];
+  while (queue.length) {
+    const id = queue.shift()!;
+    const ch = childrenByParent.get(id) ?? [];
+    for (const c of ch) {
+      nodes[c].depth = nodes[id].depth + 1;
+      queue.push(c);
+    }
+  }
+
+  function clusterGap(depth: number) {
+    return CHILD_CLUSTER_GAP + Math.min(Math.max(depth - 1, 0) * CHILD_CLUSTER_DEPTH_GAIN, 0.18);
+  }
+
+  const subtreeSpanCache = new Map<number, number>();
+
+  function subtreeSpan(nodeIdx: number): number {
+    const cached = subtreeSpanCache.get(nodeIdx);
+    if (cached !== undefined) return cached;
+
+    const ch = childrenByParent.get(nodeIdx) ?? [];
+    if (ch.length === 0) {
+      subtreeSpanCache.set(nodeIdx, MIN_SUBTREE_SPAN);
+      return MIN_SUBTREE_SPAN;
+    }
+
+    const gap = clusterGap(nodes[nodeIdx].depth);
+    const span = Math.max(
+      MIN_SUBTREE_SPAN,
+      ch.reduce((sum, cid) => sum + subtreeSpan(cid), 0) + gap * (ch.length - 1),
+    );
+    subtreeSpanCache.set(nodeIdx, span);
+    return span;
+  }
+
+  function layoutSubtree(nodeIdx: number) {
+    const ch = childrenByParent.get(nodeIdx) ?? [];
+    if (ch.length === 0) return;
+
+    const px = nodes[nodeIdx].x;
+    const pd = nodes[nodeIdx].depth;
+    const gap = clusterGap(pd);
+    const totalSpan = ch.reduce((sum, cid) => sum + subtreeSpan(cid), 0) + gap * (ch.length - 1);
+    let cursor = px - totalSpan / 2;
+
+    ch.forEach((cid) => {
+      const childSpan = subtreeSpan(cid);
+      nodes[cid].x = cursor + childSpan / 2;
+      nodes[cid].y = (pd + 1) * Y_STEP;
+      cursor += childSpan + gap;
+      layoutSubtree(cid);
+    });
+  }
+
+  const rootChildren = childrenByParent.get(rootId) ?? [];
+  const totalRootSpan =
+    rootChildren.reduce((sum, cid) => sum + subtreeSpan(cid), 0) +
+    ROOT_CLUSTER_GAP * Math.max(rootChildren.length - 1, 0);
+  let rootCursor = -totalRootSpan / 2;
+
+  for (const cid of rootChildren) {
+    const childSpan = subtreeSpan(cid);
+    nodes[cid].x = rootCursor + childSpan / 2;
+    nodes[cid].y = Y_STEP;
+    rootCursor += childSpan + ROOT_CLUSTER_GAP;
+    layoutSubtree(cid);
+  }
+
+  for (let i = 1; i < nodes.length; i++) {
+    nodes[i].x *= HORIZONTAL_PACK_SCALE;
   }
 
   return { nodes, targets };
@@ -203,7 +360,7 @@ function liftZ(nodes: Omit<NodeDef, 'z'>[]): number[] {
 }
 
 function buildNodes(): { nodes: NodeDef[]; targets: Record<number, NodeTarget> } {
-  const { nodes: base, targets } = buildLinearTree2D();
+  const { nodes: base, targets } = buildSkillForest2D();
   const zs = liftZ(base);
   return {
     nodes: base.map((n, i) => ({ ...n, z: zs[i] })),
@@ -216,7 +373,7 @@ const NODES = TREE_DATA.nodes;
 const NODE_TARGETS = TREE_DATA.targets;
 const POS: [number, number, number][] = NODES.map((n) => [n.x, n.y, n.z]);
 // Branch radii taper strongly with depth so deeper branches look thin/delicate
-const BR_R = [0.11, 0.072, 0.048, 0.032, 0.021, 0.014, 0.010];
+const BR_R = [0.102, 0.066, 0.045, 0.032, 0.021, 0.014, 0.010];
 // Branch colors lighten with depth (darker near root, warmer at tips)
 const BR_C = ['#5b341d', '#6a3e22', '#784a2c', '#85573a', '#93644a', '#a07157', '#ad7f66'];
 // Roughness + metalness per depth level — slightly smoother than before so bark catches more light
@@ -1195,261 +1352,8 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
   );
 }
 
-/**
- * 2D diagram: same XY as orthographic projection of the 3D scene (straight edges in XY).
- */
-function Layout2DOverlay({
-  frustum,
-  width,
-  height,
-}: {
-  frustum: { left: number; right: number; top: number; bottom: number };
-  width: number;
-  height: number;
-}) {
-  const { left, right, top, bottom } = frustum;
-  const w = right - left;
-  const h = top - bottom;
-
-  const toSvg = useCallback(
-    (x: number, y: number) => {
-      const px = ((x - left) / w) * width;
-      const py = ((top - y) / h) * height;
-      return { px, py };
-    },
-    [left, right, top, bottom, width, height, w, h],
-  );
-
-  const lines = useMemo(() => {
-    const out: { x1: number; y1: number; x2: number; y2: number; key: string }[] = [];
-    for (const n of NODES) {
-      if (n.parentId === null) continue;
-      const p = NODES[n.parentId];
-      const a = toSvg(p.x, p.y);
-      const b = toSvg(n.x, n.y);
-      out.push({ x1: a.px, y1: a.py, x2: b.px, y2: b.py, key: `e-${n.id}` });
-    }
-    return out;
-  }, [toSvg]);
-
-  const circles = useMemo(() => {
-    return NODES.map((n) => {
-      const { px, py } = toSvg(n.x, n.y);
-      const r = (n.size / w) * width;
-      return { ...n, px, py, r: Math.max(r, 2) };
-    });
-  }, [toSvg, w, width]);
-
-  return (
-    <svg
-      width={width}
-      height={height}
-      style={{ display: 'block', background: BACKGROUND_COLOR }}
-      aria-label="2D skill tree layout"
-    >
-      {lines.map((ln) => (
-        <line
-          key={ln.key}
-          x1={ln.x1}
-          y1={ln.y1}
-          x2={ln.x2}
-          y2={ln.y2}
-          stroke="#5d4037"
-          strokeWidth={2}
-          strokeLinecap="round"
-        />
-      ))}
-      {circles.map((n) => (
-        <circle key={n.id} cx={n.px} cy={n.py} r={n.r} fill={n.color} stroke="#1e1e24" strokeWidth={1} />
-      ))}
-    </svg>
-  );
-}
-
-
-function CompareSplitView({ onClose }: { onClose: () => void }) {
-  const splitPaneRef = useRef<HTMLDivElement>(null);
-  const [split, setSplit] = useState(0.5);
-  const splitDragging = useRef(false);
-  const [pane, setPane] = useState({ cw: 0, ch: 0 });
-  const [viewState, setViewState] = useState<ViewState>(DEFAULT_VIEW);
-
-  useEffect(() => {
-    const el = splitPaneRef.current;
-    if (!el) return;
-    const measure = () => {
-      const r = el.getBoundingClientRect();
-      setPane({ cw: r.width, ch: r.height });
-    };
-    measure();
-    const ro = new ResizeObserver(measure);
-    ro.observe(el);
-    return () => ro.disconnect();
-  }, []);
-
-  useEffect(() => {
-    const onMove = (e: PointerEvent) => {
-      if (!splitDragging.current || !splitPaneRef.current) return;
-      const r = splitPaneRef.current.getBoundingClientRect();
-      const t = (e.clientX - r.left) / r.width;
-      setSplit(THREE.MathUtils.clamp(t, 0.06, 0.94));
-    };
-    const onUp = () => {
-      splitDragging.current = false;
-    };
-    window.addEventListener('pointermove', onMove);
-    window.addEventListener('pointerup', onUp);
-    return () => {
-      window.removeEventListener('pointermove', onMove);
-      window.removeEventListener('pointerup', onUp);
-    };
-  }, []);
-
-  const sharedFrustum = useMemo(() => {
-    if (pane.cw <= 0 || pane.ch <= 0) return { left: -1, right: 1, top: 1, bottom: -1 };
-    const base = orthoFrustumForViewport(pane.cw, pane.ch);
-    return applyViewState(base, viewState);
-  }, [pane.cw, pane.ch, viewState]);
-
-  return (
-    <div
-      style={{
-        position: 'absolute',
-        inset: 0,
-        display: 'flex',
-        flexDirection: 'column',
-        background: BACKGROUND_COLOR,
-      }}
-    >
-      <div
-        style={{
-          padding: '12px 12px 0',
-          flexShrink: 0,
-          zIndex: 5,
-          display: 'flex',
-          gap: 8,
-          alignItems: 'center',
-          flexWrap: 'wrap',
-        }}
-      >
-        <button
-          type="button"
-          onClick={onClose}
-          style={{
-            padding: '6px 12px',
-            borderRadius: 8,
-            border: '1px solid #334155',
-            background: '#1e293b',
-            color: '#e2e8f0',
-            cursor: 'pointer',
-            fontSize: 13,
-          }}
-        >
-          Exit compare
-        </button>
-        <span style={{ color: '#64748b', fontSize: 12, fontFamily: 'system-ui, sans-serif' }}>
-          Orthographic XY: 2D and 3D use the same world frustum — projections match exactly. Drag handle to compare.
-        </span>
-      </div>
-
-      <div ref={splitPaneRef} style={{ flex: 1, minHeight: 0, position: 'relative' }}>
-        {pane.cw > 0 && pane.ch > 0 && (
-          <>
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                zIndex: 0,
-              }}
-            >
-        <Canvas style={{ width: '100%', height: '100%', display: 'block' }} gl={{ antialias: true }}>
-                <OrthoSkillScene viewPixels={{ w: pane.cw, h: pane.ch }} viewState={viewState} setViewState={setViewState} enableTilt={false} />
-              </Canvas>
-            </div>
-
-            {/* Top: full 2D SVG clipped from the left — reveals 3D underneath on the right */}
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                zIndex: 1,
-                pointerEvents: 'none',
-                clipPath: `polygon(0 0, ${split * 100}% 0, ${split * 100}% 100%, 0 100%)`,
-              }}
-            >
-              <Layout2DOverlay frustum={sharedFrustum} width={pane.cw} height={pane.ch} />
-            </div>
-
-            <div
-              style={{
-                position: 'absolute',
-                left: 16,
-                bottom: 14,
-                zIndex: 3,
-                pointerEvents: 'none',
-                padding: '4px 10px',
-                borderRadius: 6,
-                background: 'rgba(15,23,42,0.75)',
-                color: '#cbd5e1',
-                fontSize: 12,
-                fontFamily: 'system-ui, sans-serif',
-              }}
-            >
-              2D (same frustum)
-            </div>
-            <div
-              style={{
-                position: 'absolute',
-                right: 16,
-                bottom: 14,
-                zIndex: 3,
-                pointerEvents: 'none',
-                padding: '4px 10px',
-                borderRadius: 6,
-                background: 'rgba(241,245,249,0.92)',
-                color: '#0f172a',
-                fontSize: 12,
-                fontFamily: 'system-ui, sans-serif',
-              }}
-            >
-              3D orthographic
-            </div>
-          </>
-        )}
-
-        <div
-          role="slider"
-          aria-valuenow={Math.round(split * 100)}
-          aria-label="Compare split"
-          tabIndex={0}
-          onPointerDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-            splitDragging.current = true;
-            (e.target as HTMLElement).setPointerCapture?.(e.pointerId);
-          }}
-          style={{
-            position: 'absolute',
-            top: 0,
-            bottom: 0,
-            left: `calc(${split * 100}% - 10px)`,
-            width: 20,
-            cursor: 'col-resize',
-            zIndex: 10,
-            touchAction: 'none',
-            background:
-              'linear-gradient(90deg, transparent 0%, transparent 38%, #39ff14 38%, #39ff14 62%, transparent 62%, transparent 100%)',
-            boxShadow: '0 0 14px rgba(57,255,80,0.45)',
-          }}
-        />
-      </div>
-    </div>
-  );
-}
-
 export default function SkillTreeV3() {
   const router = useRouter();
-  const [compare, setCompare] = useState(false);
   const [activeNodeId, setActiveNodeId] = useState<number>(0);
 
   const activeTarget = NODE_TARGETS[activeNodeId] ?? NODE_TARGETS[0];
@@ -1472,39 +1376,11 @@ export default function SkillTreeV3() {
 
   return (
     <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: BACKGROUND_COLOR }}>
-      {!compare && (
-        <button
-          type="button"
-          onClick={() => setCompare(true)}
-          style={{
-            position: 'absolute',
-            top: 12,
-            left: 12,
-            zIndex: 20,
-            padding: '8px 14px',
-            borderRadius: 8,
-            border: '1px solid #334155',
-            background: '#1e293b',
-            color: '#e2e8f0',
-            cursor: 'pointer',
-            fontSize: 13,
-            fontFamily: 'system-ui, sans-serif',
-          }}
-        >
-          Compare 2D / 3D
-        </button>
-      )}
+      <Canvas gl={{ antialias: true }} style={{ width: '100%', height: '100%', background: BACKGROUND_COLOR }}>
+        <OrthoSkillScene onNodeHover={handleNodeHover} onNodeActivate={handleNodeActivate} />
+      </Canvas>
 
-      {compare ? (
-        <CompareSplitView onClose={() => setCompare(false)} />
-      ) : (
-        <Canvas gl={{ antialias: true }} style={{ width: '100%', height: '100%', background: BACKGROUND_COLOR }}>
-          <OrthoSkillScene onNodeHover={handleNodeHover} onNodeActivate={handleNodeActivate} />
-        </Canvas>
-      )}
-
-      {!compare && (
-        <aside
+      <aside
           style={{
             position: 'absolute',
             left: '92%',
@@ -1522,14 +1398,13 @@ export default function SkillTreeV3() {
           }}
         >
           <p style={{ margin: 0, fontSize: 11, letterSpacing: '0.06em', textTransform: 'uppercase', color: '#93c5fd' }}>
-            Node destination
+            {activeTarget.skill}
           </p>
           <h3 style={{ margin: '4px 0 0', fontSize: 17, lineHeight: 1.2, color: '#f8fafc' }}>
-            {activeTarget.skill}
+            {activeTarget.nodeLabel}
           </h3>
           <p style={{ margin: '8px 0 0', fontSize: 12, color: '#cbd5e1' }}>{activeTarget.detail}</p>
         </aside>
-      )}
     </div>
   );
 }

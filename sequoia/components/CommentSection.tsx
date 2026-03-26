@@ -11,7 +11,13 @@ import {
   convertContentForSubmit,
 } from "@/lib/markdown";
 
-export default function CommentSection({ postId }: { postId: string }) {
+export default function CommentSection({
+  postId,
+  onCountChange,
+}: {
+  postId: string;
+  onCountChange?: (count: number) => void;
+}) {
   const { user, displayName, isGuest } = useAuth();
   const canComment = !!user || isGuest;
   const [comments, setComments] = useState<Comment[]>([]);
@@ -29,6 +35,7 @@ export default function CommentSection({ postId }: { postId: string }) {
     setLoading(true);
     const data = await fetchComments(postId);
     setComments(data);
+    onCountChange?.(data.length);
     const counts: Record<string, number> = {};
     for (const c of data) counts[c.id] = c.like_count;
     setLikeCounts(counts);

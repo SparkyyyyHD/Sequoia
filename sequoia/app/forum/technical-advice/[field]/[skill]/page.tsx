@@ -1,11 +1,10 @@
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
+import { getForumCategory, getSubsectionLabel } from "@/lib/forum";
 import {
-  buildTechnicalTierSubsection,
-  getForumCategory,
-  getSkillTier,
-  getSubsectionLabel,
-} from "@/lib/forum";
+  buildTechnicalSkillSubsection,
+  getTechnicalSkillNode,
+} from "@/lib/skillTrees";
 import PostList from "@/components/PostList";
 import PostForm from "@/components/PostForm";
 import FavoriteButton from "@/components/FavoriteButton";
@@ -13,20 +12,20 @@ import JoinForumButton from "@/components/JoinForumButton";
 
 const TECHNICAL_ADVICE = getForumCategory("technical-advice");
 
-export default async function ForumTechnicalTierPage({
+export default async function ForumTechnicalSkillPage({
   params,
 }: {
-  params: Promise<{ field: string; tier: string }>;
+  params: Promise<{ field: string; skill: string }>;
 }) {
-  const { field, tier } = await params;
+  const { field, skill } = await params;
 
   const fieldExists = TECHNICAL_ADVICE?.subsections.some((item) => item.slug === field);
-  const tierMeta = getSkillTier(tier);
-  if (!fieldExists || !tierMeta) {
+  const skillMeta = getTechnicalSkillNode(field, skill);
+  if (!fieldExists || !skillMeta) {
     notFound();
   }
 
-  const subsection = buildTechnicalTierSubsection(field, tierMeta.slug);
+  const subsection = buildTechnicalSkillSubsection(field, skill);
 
   const { data: posts } = await supabase
     .from("posts")
@@ -46,10 +45,10 @@ export default async function ForumTechnicalTierPage({
           <div>
             <p className="forum-kicker">Technical advice</p>
             <h1 className="mt-0.5 text-lg font-semibold text-[var(--forum-text-primary)]">
-              {fieldLabel} · {tierMeta.label}
+              {fieldLabel} · {skillMeta.label}
             </h1>
             <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
-              {tierMeta.description}
+              {skillMeta.description}
             </p>
           </div>
           <div className="flex items-center gap-1">

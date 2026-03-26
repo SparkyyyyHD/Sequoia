@@ -1,3 +1,11 @@
+import {
+  buildTechnicalSkillSubsection,
+  getLifeSkillNode,
+  getTechnicalSkillNode,
+  parseTechnicalSkillSubsection,
+  LIFE_SKILL_TREE,
+} from "@/lib/skillTrees";
+
 export type ForumCategorySlug = "life-advice" | "technical-advice";
 
 export interface ForumSubsection {
@@ -13,84 +21,16 @@ export interface ForumCategory {
   subsections: ForumSubsection[];
 }
 
-export interface SkillTier {
-  slug: string;
-  label: string;
-  description: string;
-}
-
-export const SKILL_TIERS: SkillTier[] = [
-  {
-    slug: "level-1",
-    label: "Level 1",
-    description: "Beginner fundamentals and starter questions.",
-  },
-  {
-    slug: "level-2",
-    label: "Level 2",
-    description: "Early practice and first troubleshooting wins.",
-  },
-  {
-    slug: "level-3",
-    label: "Level 3",
-    description: "Intermediate techniques and repeatable results.",
-  },
-  {
-    slug: "level-4",
-    label: "Level 4",
-    description: "Advanced workflows, speed, and consistency.",
-  },
-  {
-    slug: "level-5",
-    label: "Level 5",
-    description: "Expert tactics and high-stakes decision making.",
-  },
-  {
-    slug: "level-6",
-    label: "Level 6",
-    description: "Master-level strategy, mentoring, and refinement.",
-  },
-];
-
-const TECHNICAL_TIER_SEPARATOR = "__";
-
 export const FORUM_CATEGORIES: ForumCategory[] = [
   {
     slug: "life-advice",
     label: "Life Advice",
-    description: "Advice threads tailored by age group.",
-    subsections: [
-      {
-        slug: "under-18",
-        label: "Under 18",
-        description: "School, confidence, and navigating early life choices.",
-      },
-      {
-        slug: "18-25",
-        label: "18-25",
-        description: "College, first jobs, money basics, and relationships.",
-      },
-      {
-        slug: "26-35",
-        label: "26-35",
-        description: "Career momentum, family planning, and long-term goals.",
-      },
-      {
-        slug: "36-50",
-        label: "36-50",
-        description: "Leadership, parenting, health, and financial strategy.",
-      },
-      {
-        slug: "51-65",
-        label: "51-65",
-        description: "Transitions, mentoring, retirement preparation, and wellness.",
-      },
-      {
-        slug: "over-65",
-        label: "Over 65",
-        description: "Community, purpose, longevity, and legacy conversations.",
-      },
-    ],
+    description: "Life skills with prerequisites—relationships, school, work, money, and more.",
+    subsections: LIFE_SKILL_TREE.map((n) => ({
+      slug: n.slug,
+      label: n.label,
+      description: n.description,
+    })),
   },
   {
     slug: "technical-advice",
@@ -145,27 +85,20 @@ export function getForumCategory(slug: string): ForumCategory | undefined {
   return FORUM_CATEGORIES.find((category) => category.slug === slug);
 }
 
-export function getSkillTier(slug: string): SkillTier | undefined {
-  return SKILL_TIERS.find((tier) => tier.slug === slug);
-}
-
+/** @deprecated Use buildTechnicalSkillSubsection from skillTrees; kept for gradual migration. */
 export function buildTechnicalTierSubsection(
   fieldSlug: string,
-  tierSlug: string
+  skillSlug: string
 ): string {
-  return `${fieldSlug}${TECHNICAL_TIER_SEPARATOR}${tierSlug}`;
+  return buildTechnicalSkillSubsection(fieldSlug, skillSlug);
 }
 
+/** @deprecated Use parseTechnicalSkillSubsection from skillTrees. */
 export function parseTechnicalTierSubsection(subsectionSlug: string): {
   fieldSlug: string;
-  tierSlug: string;
+  skillSlug: string;
 } | null {
-  const [fieldSlug, tierSlug, extra] = subsectionSlug.split(
-    TECHNICAL_TIER_SEPARATOR
-  );
-  if (!fieldSlug || !tierSlug || extra) return null;
-  if (!getSkillTier(tierSlug)) return null;
-  return { fieldSlug, tierSlug };
+  return parseTechnicalSkillSubsection(subsectionSlug);
 }
 
 export function getForumSubsectionHref(
@@ -176,9 +109,9 @@ export function getForumSubsectionHref(
     return `/forum/life-advice/${subsectionSlug}`;
   }
 
-  const parsed = parseTechnicalTierSubsection(subsectionSlug);
+  const parsed = parseTechnicalSkillSubsection(subsectionSlug);
   if (parsed) {
-    return `/forum/technical-advice/${parsed.fieldSlug}/${parsed.tierSlug}`;
+    return `/forum/technical-advice/${parsed.fieldSlug}/${parsed.skillSlug}`;
   }
   return `/forum/technical-advice/${subsectionSlug}`;
 }
@@ -187,12 +120,17 @@ export function getSubsectionLabel(
   categorySlug: ForumCategorySlug,
   subsectionSlug: string
 ): string {
+  if (categorySlug === "life-advice") {
+    const node = getLifeSkillNode(subsectionSlug);
+    if (node) return node.label;
+  }
+
   if (categorySlug === "technical-advice") {
-    const parsed = parseTechnicalTierSubsection(subsectionSlug);
+    const parsed = parseTechnicalSkillSubsection(subsectionSlug);
     if (parsed) {
       const fieldLabel = getSubsectionLabel("technical-advice", parsed.fieldSlug);
-      const tier = getSkillTier(parsed.tierSlug);
-      if (tier) return `${fieldLabel} · ${tier.label}`;
+      const skill = getTechnicalSkillNode(parsed.fieldSlug, parsed.skillSlug);
+      if (skill) return `${fieldLabel} · ${skill.label}`;
     }
   }
 

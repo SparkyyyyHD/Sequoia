@@ -7,11 +7,14 @@ import MarkdownContent from "@/components/MarkdownContent";
 import { supabase } from "@/lib/supabase";
 import {
   getForumSubsectionHref,
-  getSkillTier,
   getSubsectionLabel,
-  parseTechnicalTierSubsection,
   type ForumCategorySlug,
 } from "@/lib/forum";
+import {
+  getTechnicalSkillNode,
+  getTechnicalSkillDepth,
+  parseTechnicalSkillSubsection,
+} from "@/lib/skillTrees";
 import { getJoinedForums, parseForumKey, JOINED_FORUMS_CHANGE_EVENT } from "@/lib/joinedForums";
 import type { Post } from "@/lib/postTypes";
 
@@ -147,8 +150,8 @@ export default function AccountPage() {
       {
         fieldSlug: string;
         fieldLabel: string;
-        tierLabel: string;
-        tierRank: number;
+        skillLabel: string;
+        depth: number;
         postCount: number;
         href: string;
       }
@@ -158,24 +161,24 @@ export default function AccountPage() {
       const parsedKey = parseForumKey(key);
       if (!parsedKey || parsedKey.category !== "technical-advice") continue;
 
-      const parsedTier = parseTechnicalTierSubsection(parsedKey.subsection);
-      if (!parsedTier) continue;
+      const parsedSkill = parseTechnicalSkillSubsection(parsedKey.subsection);
+      if (!parsedSkill) continue;
 
-      const tierMeta = getSkillTier(parsedTier.tierSlug);
-      if (!tierMeta) continue;
+      const skillMeta = getTechnicalSkillNode(parsedSkill.fieldSlug, parsedSkill.skillSlug);
+      if (!skillMeta) continue;
 
-      const tierRank = Number(tierMeta.slug.replace("level-", ""));
-      const fieldLabel = getSubsectionLabel("technical-advice", parsedTier.fieldSlug);
+      const depth = getTechnicalSkillDepth(parsedSkill.fieldSlug, parsedSkill.skillSlug);
+      const fieldLabel = getSubsectionLabel("technical-advice", parsedSkill.fieldSlug);
       const postCount = postsBySubsection.get(parsedKey.subsection) ?? 0;
       const href = getForumSubsectionHref("technical-advice", parsedKey.subsection);
 
-      const current = byField.get(parsedTier.fieldSlug);
-      if (!current || tierRank > current.tierRank) {
-        byField.set(parsedTier.fieldSlug, {
-          fieldSlug: parsedTier.fieldSlug,
+      const current = byField.get(parsedSkill.fieldSlug);
+      if (!current || depth > current.depth) {
+        byField.set(parsedSkill.fieldSlug, {
+          fieldSlug: parsedSkill.fieldSlug,
           fieldLabel,
-          tierLabel: tierMeta.label,
-          tierRank,
+          skillLabel: skillMeta.label,
+          depth,
           postCount,
           href,
         });
@@ -263,12 +266,12 @@ export default function AccountPage() {
             Joined technical skills
           </h2>
           <p className="mt-0.5 text-xs text-[var(--forum-text-secondary)]">
-            Your current tier for each technical skill you joined, and how much you posted there.
+            Your deepest joined skill node per technical field (by prerequisite depth) and how much you posted there.
           </p>
 
           {joinedTechnicalSkills.length === 0 ? (
             <p className="mt-2 text-sm text-[var(--forum-text-muted)]">
-              Join a technical tier forum to start tracking your skill tiers.
+              Join a technical skill forum to start tracking your progress.
             </p>
           ) : (
             <ul className="mt-3 space-y-2">
@@ -280,7 +283,7 @@ export default function AccountPage() {
                         {skill.fieldLabel}
                       </p>
                       <p className="text-xs text-[var(--forum-text-secondary)]">
-                        Tier: {skill.tierLabel}
+                        Skill: {skill.skillLabel}
                       </p>
                     </div>
                     <div className="text-right">
@@ -291,7 +294,7 @@ export default function AccountPage() {
                     </div>
                   </div>
                   <Link href={skill.href} className="forum-link mt-2 inline-block text-xs">
-                    Open joined tier forum
+                    Open joined skill forum
                   </Link>
                 </li>
               ))}
@@ -304,7 +307,7 @@ export default function AccountPage() {
             Joined life advice groups
           </h2>
           <p className="mt-0.5 text-xs text-[var(--forum-text-secondary)]">
-            Your joined life advice age groups and how much you posted there.
+            Your joined life skill forums and how much you posted there.
           </p>
 
           {joinedLifeAdviceGroups.length === 0 ? (
@@ -329,7 +332,7 @@ export default function AccountPage() {
                     </div>
                   </div>
                   <Link href={group.href} className="forum-link mt-2 inline-block text-xs">
-                    Open joined group forum
+                    Open joined skill forum
                   </Link>
                 </li>
               ))}

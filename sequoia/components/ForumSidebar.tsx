@@ -3,9 +3,19 @@
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { FORUM_CATEGORIES } from "@/lib/forum";
+import {
+  LIFE_SKILL_PILLARS,
+  getLifeSkillPillarBySkillSlug,
+} from "@/lib/skillTrees";
 
 export default function ForumSidebar() {
   const pathname = usePathname();
+  const activeLifeSkillSlug = pathname.startsWith("/forum/life-advice/")
+    ? pathname.slice("/forum/life-advice/".length).split("/")[0]
+    : null;
+  const activeLifePillar = activeLifeSkillSlug
+    ? getLifeSkillPillarBySkillSlug(activeLifeSkillSlug)
+    : null;
 
   return (
     <aside className="forum-sidebar">
@@ -60,22 +70,38 @@ export default function ForumSidebar() {
                   {category.label}
                 </Link>
                 <div className="forum-sidebar-subsections">
-                  {category.subsections.map((sub) => {
-                    const subHref = `/forum/${category.slug}/${sub.slug}`;
-                    const isSubActive =
-                      pathname === subHref || pathname.startsWith(`${subHref}/`);
+                  {category.slug === "life-advice"
+                    ? LIFE_SKILL_PILLARS.map((pillar) => {
+                        const subHref = `/forum/life-advice#${pillar.slug}`;
+                        const isSubActive = activeLifePillar?.slug === pillar.slug;
 
-                    return (
-                      <Link
-                        key={sub.slug}
-                        href={subHref}
-                        className="forum-sidebar-sublink"
-                        data-active={isSubActive ? "true" : undefined}
-                      >
-                        {sub.label}
-                      </Link>
-                    );
-                  })}
+                        return (
+                          <Link
+                            key={pillar.slug}
+                            href={subHref}
+                            className="forum-sidebar-sublink"
+                            data-active={isSubActive ? "true" : undefined}
+                          >
+                            {pillar.label}
+                          </Link>
+                        );
+                      })
+                    : category.subsections.map((sub) => {
+                        const subHref = `/forum/${category.slug}/${sub.slug}`;
+                        const isSubActive =
+                          pathname === subHref || pathname.startsWith(`${subHref}/`);
+
+                        return (
+                          <Link
+                            key={sub.slug}
+                            href={subHref}
+                            className="forum-sidebar-sublink"
+                            data-active={isSubActive ? "true" : undefined}
+                          >
+                            {sub.label}
+                          </Link>
+                        );
+                      })}
                 </div>
               </div>
             );

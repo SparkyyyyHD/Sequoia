@@ -23,6 +23,7 @@ interface PostListProps {
 export default function PostList({ posts, showSubsectionLink }: PostListProps) {
   const [myVotes, setMyVotes] = useState<Record<string, 1 | -1>>({});
   const [openComments, setOpenComments] = useState<Set<string>>(new Set());
+  const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
   const idsKey = useMemo(() => posts.map((p) => p.id).sort().join(","), [posts]);
 
   useEffect(() => {
@@ -45,6 +46,39 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
     load();
     return () => { cancelled = true; };
   }, [idsKey, posts.length]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadCommentCounts() {
+      if (posts.length === 0) {
+        setCommentCounts({});
+        return;
+      }
+
+      const ids = posts.map((p) => p.id);
+      const { data } = await supabase
+        .from("comments")
+        .select("post_id")
+        .in("post_id", ids);
+
+      if (cancelled) return;
+
+      const next = ids.reduce<Record<string, number>>((acc, id) => {
+        acc[id] = 0;
+        return acc;
+      }, {});
+
+      for (const row of (data ?? []) as { post_id: string }[]) {
+        next[row.post_id] = (next[row.post_id] ?? 0) + 1;
+      }
+
+      setCommentCounts(next);
+    }
+
+    loadCommentCounts();
+    return () => { cancelled = true; };
+  }, [idsKey, posts]);
 
   function handleMyVoteUpdate(postId: string, vote: 1 | -1 | null) {
     setMyVotes((prev) => {
@@ -116,13 +150,18 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
                 onClick={() => toggleComments(post.id)}
                 className={`post-action-btn${commentsOpen ? " post-action-btn--active" : ""}`}
               >
-                Comments
+                Comments ({commentCounts[post.id] ?? 0})
               </button>
               <ShareButton postId={post.id} />
             </div>
             {commentsOpen && (
               <div className="mt-3 border-t border-[var(--forum-border)] pt-3">
-                <CommentSection postId={post.id} />
+                <CommentSection
+                  postId={post.id}
+                  onCountChange={(count) =>
+                    setCommentCounts((prev) => ({ ...prev, [post.id]: count }))
+                  }
+                />
               </div>
             )}
           </li>

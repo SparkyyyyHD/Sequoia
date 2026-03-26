@@ -1,21 +1,19 @@
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getForumCategory, getSubsectionLabel } from "@/lib/forum";
+import { getLifeSkillNode } from "@/lib/skillTrees";
 import PostList from "@/components/PostList";
 import PostForm from "@/components/PostForm";
 import FavoriteButton from "@/components/FavoriteButton";
 import JoinForumButton from "@/components/JoinForumButton";
 
-const LIFE_ADVICE = getForumCategory("life-advice");
-
-export default async function ForumAgeGroupPage({
+export default async function ForumLifeSkillPage({
   params,
 }: {
-  params: Promise<{ ageGroup: string }>;
+  params: Promise<{ skill: string }>;
 }) {
-  const { ageGroup } = await params;
-
-  if (!LIFE_ADVICE?.subsections.some((group) => group.slug === ageGroup)) {
+  const { skill } = await params;
+  const meta = getLifeSkillNode(skill);
+  if (!meta) {
     notFound();
   }
 
@@ -25,10 +23,8 @@ export default async function ForumAgeGroupPage({
       "id, content, author_name, created_at, helpful_count, not_helpful_count, category, subcategory"
     )
     .eq("category", "life-advice")
-    .eq("subcategory", ageGroup)
+    .eq("subcategory", skill)
     .order("created_at", { ascending: false });
-
-  const label = getSubsectionLabel("life-advice", ageGroup);
 
   return (
     <>
@@ -37,17 +33,20 @@ export default async function ForumAgeGroupPage({
           <div>
             <p className="forum-kicker">Life advice</p>
             <h1 className="mt-0.5 text-lg font-semibold text-[var(--forum-text-primary)]">
-              {label}
+              {meta.label}
             </h1>
+            <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
+              {meta.description}
+            </p>
           </div>
           <div className="flex items-center gap-1">
-            <JoinForumButton category="life-advice" subsection={ageGroup} />
-            <FavoriteButton category="life-advice" subsection={ageGroup} />
+            <JoinForumButton category="life-advice" subsection={skill} />
+            <FavoriteButton category="life-advice" subsection={skill} />
           </div>
         </div>
       </header>
 
-      <PostForm category="life-advice" subcategory={ageGroup} />
+      <PostForm category="life-advice" subcategory={skill} />
       <PostList posts={posts ?? []} />
     </>
   );
