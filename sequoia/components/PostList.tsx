@@ -4,7 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateVoterKey } from "@/lib/voterKey";
-import { getSubsectionLabel, type ForumCategorySlug } from "@/lib/forum";
+import {
+  getForumSubsectionHref,
+  getSubsectionLabel,
+  type ForumCategorySlug,
+} from "@/lib/forum";
 import type { Post } from "@/lib/postTypes";
 import PostVoteBar from "@/components/PostVoteBar";
 import CommentSection from "@/components/CommentSection";
@@ -71,7 +75,8 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
         const sub = post.subcategory;
         const subsectionLabel =
           cat && sub ? getSubsectionLabel(cat as ForumCategorySlug, sub) : null;
-        const subsectionHref = cat && sub ? `/forum/${cat}/${sub}` : null;
+        const subsectionHref =
+          cat && sub ? getForumSubsectionHref(cat as ForumCategorySlug, sub) : null;
         const commentsOpen = openComments.has(post.id);
 
         return (

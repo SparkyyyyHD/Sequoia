@@ -4,7 +4,7 @@ import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrthographicCamera } from '@react-three/drei';
 import { Bloom, EffectComposer, Noise, Vignette } from '@react-three/postprocessing';
 import { useRouter } from 'next/navigation';
-import { FORUM_CATEGORIES, type ForumCategorySlug } from '@/lib/forum';
+import { FORUM_CATEGORIES, SKILL_TIERS, buildTechnicalTierSubsection, type ForumCategorySlug } from '@/lib/forum';
 import { useRef, useState, useCallback, useEffect, useMemo, memo, type Dispatch, type SetStateAction } from 'react';
 import * as THREE from 'three';
 
@@ -62,8 +62,6 @@ const TREE_W = 19;
 const Z_MAX_ACC = 5;
 const SKILL_BASE_COLORS = ['#6ec5ff', '#7ad78f', '#ff9966', '#f7be4b', '#c79dff', '#4cd7c2', '#ff7ca2', '#9fd06f', '#73a1ff'];
 
-const SKILL_LEVELS = ['Level 1', 'Level 2', 'Level 3', 'Level 4', 'Level 5', 'Level 6'];
-
 interface SkillPath {
   skill: string;
   categorySlug: ForumCategorySlug;
@@ -96,11 +94,11 @@ function buildSkillPaths(): SkillPath[] {
       paths.push({
         skill: sub.label,
         categorySlug: category.slug,
-        levels: SKILL_LEVELS.map((levelLabel, li) => ({
-          label: levelLabel,
-          href: `/forum/technical-advice/${sub.slug}`,
-          detail: `${sub.description} Progress tier ${li + 1}.`,
-          subsectionSlug: sub.slug,
+        levels: SKILL_TIERS.map((tier) => ({
+          label: tier.label,
+          href: `/forum/technical-advice/${sub.slug}/${tier.slug}`,
+          detail: `${sub.description} ${tier.description}`,
+          subsectionSlug: buildTechnicalTierSubsection(sub.slug, tier.slug),
         })),
       });
     }

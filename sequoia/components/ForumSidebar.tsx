@@ -25,6 +25,13 @@ export default function ForumSidebar() {
           >
             Skill Tree
           </Link>
+          <Link
+            href="/account"
+            className="forum-sidebar-link"
+            data-active={pathname === "/account" ? "true" : undefined}
+          >
+            Dashboard
+          </Link>
 
           {/* Mobile: show category links inline */}
           {FORUM_CATEGORIES.map((category) => (
@@ -55,7 +62,8 @@ export default function ForumSidebar() {
                 <div className="forum-sidebar-subsections">
                   {category.subsections.map((sub) => {
                     const subHref = `/forum/${category.slug}/${sub.slug}`;
-                    const isSubActive = pathname === subHref;
+                    const isSubActive =
+                      pathname === subHref || pathname.startsWith(`${subHref}/`);
 
                     return (
                       <Link

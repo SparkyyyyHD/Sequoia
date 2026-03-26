@@ -32,6 +32,9 @@ export default function Navbar() {
         <div className="navbar-auth">
           {user || isGuest ? (
             <>
+              <Link href="/account" className="navbar-account-link">
+                Dashboard
+              </Link>
               <span className="navbar-user">
                 {displayName}
                 {isGuest && (

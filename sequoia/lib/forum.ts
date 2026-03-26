@@ -13,6 +13,47 @@ export interface ForumCategory {
   subsections: ForumSubsection[];
 }
 
+export interface SkillTier {
+  slug: string;
+  label: string;
+  description: string;
+}
+
+export const SKILL_TIERS: SkillTier[] = [
+  {
+    slug: "level-1",
+    label: "Level 1",
+    description: "Beginner fundamentals and starter questions.",
+  },
+  {
+    slug: "level-2",
+    label: "Level 2",
+    description: "Early practice and first troubleshooting wins.",
+  },
+  {
+    slug: "level-3",
+    label: "Level 3",
+    description: "Intermediate techniques and repeatable results.",
+  },
+  {
+    slug: "level-4",
+    label: "Level 4",
+    description: "Advanced workflows, speed, and consistency.",
+  },
+  {
+    slug: "level-5",
+    label: "Level 5",
+    description: "Expert tactics and high-stakes decision making.",
+  },
+  {
+    slug: "level-6",
+    label: "Level 6",
+    description: "Master-level strategy, mentoring, and refinement.",
+  },
+];
+
+const TECHNICAL_TIER_SEPARATOR = "__";
+
 export const FORUM_CATEGORIES: ForumCategory[] = [
   {
     slug: "life-advice",
@@ -104,10 +145,57 @@ export function getForumCategory(slug: string): ForumCategory | undefined {
   return FORUM_CATEGORIES.find((category) => category.slug === slug);
 }
 
+export function getSkillTier(slug: string): SkillTier | undefined {
+  return SKILL_TIERS.find((tier) => tier.slug === slug);
+}
+
+export function buildTechnicalTierSubsection(
+  fieldSlug: string,
+  tierSlug: string
+): string {
+  return `${fieldSlug}${TECHNICAL_TIER_SEPARATOR}${tierSlug}`;
+}
+
+export function parseTechnicalTierSubsection(subsectionSlug: string): {
+  fieldSlug: string;
+  tierSlug: string;
+} | null {
+  const [fieldSlug, tierSlug, extra] = subsectionSlug.split(
+    TECHNICAL_TIER_SEPARATOR
+  );
+  if (!fieldSlug || !tierSlug || extra) return null;
+  if (!getSkillTier(tierSlug)) return null;
+  return { fieldSlug, tierSlug };
+}
+
+export function getForumSubsectionHref(
+  categorySlug: ForumCategorySlug,
+  subsectionSlug: string
+): string {
+  if (categorySlug === "life-advice") {
+    return `/forum/life-advice/${subsectionSlug}`;
+  }
+
+  const parsed = parseTechnicalTierSubsection(subsectionSlug);
+  if (parsed) {
+    return `/forum/technical-advice/${parsed.fieldSlug}/${parsed.tierSlug}`;
+  }
+  return `/forum/technical-advice/${subsectionSlug}`;
+}
+
 export function getSubsectionLabel(
   categorySlug: ForumCategorySlug,
   subsectionSlug: string
 ): string {
+  if (categorySlug === "technical-advice") {
+    const parsed = parseTechnicalTierSubsection(subsectionSlug);
+    if (parsed) {
+      const fieldLabel = getSubsectionLabel("technical-advice", parsed.fieldSlug);
+      const tier = getSkillTier(parsed.tierSlug);
+      if (tier) return `${fieldLabel} · ${tier.label}`;
+    }
+  }
+
   const category = getForumCategory(categorySlug);
   const subsection = category?.subsections.find((item) => item.slug === subsectionSlug);
   return subsection?.label ?? subsectionSlug;

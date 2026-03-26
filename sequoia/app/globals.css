@@ -384,6 +384,32 @@ body {
   color: #b45309;
 }
 
+.forum-join-btn {
+  background: #ffffff;
+  border: 1px solid var(--forum-border);
+  border-radius: 3px;
+  color: var(--forum-text-secondary);
+  cursor: pointer;
+  font-size: 0.6875rem;
+  font-weight: 600;
+  line-height: 1;
+  padding: 0.3rem 0.45rem;
+  position: relative;
+  z-index: 2;
+  flex-shrink: 0;
+}
+
+.forum-join-btn:hover {
+  border-color: #bbb;
+  color: var(--forum-text-primary);
+}
+
+.forum-join-btn--active {
+  background: #eef2ff;
+  border-color: #93c5fd;
+  color: var(--forum-accent-hover);
+}
+
 /* ── Post actions bar ───────────────────────── */
 
 .post-actions {
@@ -592,6 +618,17 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.navbar-account-link {
+  color: var(--forum-accent);
+  font-size: 0.8125rem;
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.navbar-account-link:hover {
+  text-decoration: underline;
 }
 
 .navbar-signout {

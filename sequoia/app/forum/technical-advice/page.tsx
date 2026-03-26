@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getForumCategory } from "@/lib/forum";
 import FavoriteButton from "@/components/FavoriteButton";
+import JoinForumButton from "@/components/JoinForumButton";
 
 const TECHNICAL_ADVICE = getForumCategory("technical-advice");
 
@@ -32,7 +33,10 @@ export default function ForumTechnicalAdvicePage() {
               >
                 {subsection.label}
               </Link>
-              <FavoriteButton category="technical-advice" subsection={subsection.slug} />
+              <div className="flex items-center gap-1">
+                {/* No JoinForumButton for global forum */}
+                <FavoriteButton category="technical-advice" subsection={subsection.slug} />
+              </div>
             </div>
             <p className="mt-0.5 text-xs text-[var(--forum-text-secondary)]">
               {subsection.description}

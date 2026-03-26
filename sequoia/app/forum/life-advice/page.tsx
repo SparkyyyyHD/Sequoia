@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { getForumCategory } from "@/lib/forum";
 import FavoriteButton from "@/components/FavoriteButton";
+import JoinForumButton from "@/components/JoinForumButton";
 
 const LIFE_ADVICE = getForumCategory("life-advice");
 
@@ -32,7 +33,13 @@ export default function ForumLifeAdvicePage() {
               >
                 {subsection.label}
               </Link>
-              <FavoriteButton category="life-advice" subsection={subsection.slug} />
+              <div className="flex items-center gap-1">
+                <JoinForumButton
+                  category="life-advice"
+                  subsection={subsection.slug}
+                />
+                <FavoriteButton category="life-advice" subsection={subsection.slug} />
+              </div>
             </div>
             <p className="mt-0.5 text-xs text-[var(--forum-text-secondary)]">
               {subsection.description}

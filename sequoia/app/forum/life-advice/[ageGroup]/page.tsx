@@ -4,6 +4,7 @@ import { getForumCategory, getSubsectionLabel } from "@/lib/forum";
 import PostList from "@/components/PostList";
 import PostForm from "@/components/PostForm";
 import FavoriteButton from "@/components/FavoriteButton";
+import JoinForumButton from "@/components/JoinForumButton";
 
 const LIFE_ADVICE = getForumCategory("life-advice");
 
@@ -39,7 +40,10 @@ export default async function ForumAgeGroupPage({
               {label}
             </h1>
           </div>
-          <FavoriteButton category="life-advice" subsection={ageGroup} />
+          <div className="flex items-center gap-1">
+            <JoinForumButton category="life-advice" subsection={ageGroup} />
+            <FavoriteButton category="life-advice" subsection={ageGroup} />
+          </div>
         </div>
       </header>
 
