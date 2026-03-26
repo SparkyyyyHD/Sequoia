@@ -1,5 +1,5 @@
 "use client";
-
+import ForumSidebar from "@/components/ForumSidebar";
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
@@ -221,46 +221,46 @@ export default function AccountPage() {
   }
 
   return (
-    <main className="forum-page">
-      <div className="forum-shell">
-        <header className="forum-card p-4 sm:p-5">
-          <p className="forum-kicker">Account</p>
-          <h1 className="mt-0.5 text-lg font-semibold text-[var(--forum-text-primary)]">
-            {displayName}
-          </h1>
-          <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
-            Sequoia points are earned when other users find your posts helpful, and lost when they find them unhelpful. Points are a reflection of your overall contribution to the community, but remember that every post is an opportunity to share your unique perspective and advice.
-          </p>
-        </header>
+    <main className="forum-page forum-with-sidebar">
+      <ForumSidebar />
+      <div className="forum-main">
+        <div className="forum-shell">
+          <header className="forum-card p-4 sm:p-5">
+            <p className="forum-kicker">Account</p>
+            <h1 className="mt-0.5 text-lg font-semibold text-[var(--forum-text-primary)]">
+              {displayName}
+            </h1>
+            <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
+              Sequoia points are earned when other users find your posts helpful, and lost when they find them unhelpful. Points are a reflection of your overall contribution to the community, but remember that every post is an opportunity to share your unique perspective and advice.
+            </p>
+          </header>
 
-        <section className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
-          <article className="forum-subsection-card p-3">
-            <p className="forum-section-label">Sequoia points</p>
-            <p className="mt-1 text-xl font-semibold text-[var(--forum-text-primary)]">
-              {stats.points}
-            </p>
-          </article>
-          <article className="forum-subsection-card p-3">
-            <p className="forum-section-label">Helpful</p>
-            <p className="mt-1 text-xl font-semibold text-[var(--forum-text-primary)]">
-              {stats.helpful}
-            </p>
-          </article>
-          <article className="forum-subsection-card p-3">
-            <p className="forum-section-label">Not helpful</p>
-            <p className="mt-1 text-xl font-semibold text-[var(--forum-text-primary)]">
-              {stats.notHelpful}
-            </p>
-          </article>
-          <article className="forum-subsection-card p-3">
-            <p className="forum-section-label">Posts</p>
-            <p className="mt-1 text-xl font-semibold text-[var(--forum-text-primary)]">
-              {stats.totalPosts}
-            </p>
-          </article>
-        </section>
-
-
+          <section className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-4">
+            <article className="forum-subsection-card p-3">
+              <p className="forum-section-label">Sequoia points</p>
+              <p className="mt-1 text-xl font-semibold text-[var(--forum-text-primary)]">
+                {stats.points}
+              </p>
+            </article>
+            <article className="forum-subsection-card p-3">
+              <p className="forum-section-label">Helpful</p>
+              <p className="mt-1 text-xl font-semibold text-[var(--forum-text-primary)]">
+                {stats.helpful}
+              </p>
+            </article>
+            <article className="forum-subsection-card p-3">
+              <p className="forum-section-label">Not helpful</p>
+              <p className="mt-1 text-xl font-semibold text-[var(--forum-text-primary)]">
+                {stats.notHelpful}
+              </p>
+            </article>
+            <article className="forum-subsection-card p-3">
+              <p className="forum-section-label">Posts</p>
+              <p className="mt-1 text-xl font-semibold text-[var(--forum-text-primary)]">
+                {stats.totalPosts}
+              </p>
+            </article>
+          </section>
         <section className="mt-4 forum-card p-4 sm:p-5">
           <h2 className="text-sm font-semibold text-[var(--forum-text-primary)]">
             Joined technical skills
@@ -402,6 +402,7 @@ export default function AccountPage() {
             </ul>
           )}
         </section>
+        </div>
       </div>
     </main>
   );

@@ -7,6 +7,7 @@ import { getOrCreateVoterKey } from "@/lib/voterKey";
 import { fetchComments, type Comment } from "@/lib/comments";
 import { useAuth } from "@/components/AuthProvider";
 import MarkdownContent from "@/components/MarkdownContent";
+import { buildAttachmentMarkdown, uploadAttachments } from "@/lib/attachments";
 import {
   convertContentForSubmit,
 } from "@/lib/markdown";
@@ -226,19 +227,56 @@ function InlineCommentForm({
   displayName: string | null;
 }) {
   const [content, setContent] = useState("");
+  const [attachments, setAttachments] = useState<File[]>([]);
   const [pending, setPending] = useState(false);
+  const [uploadingAttachments, setUploadingAttachments] = useState(false);
+  const [fileInputKey, setFileInputKey] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const previewContent = convertContentForSubmit(content);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!previewContent) return;
+    if (!previewContent && attachments.length === 0) return;
+
+    let attachmentMarkdown = "";
+    if (attachments.length > 0) {
+      setUploadingAttachments(true);
+      try {
+        const urls = await uploadAttachments(attachments, "comments");
+        attachmentMarkdown = urls
+          .map((url, idx) => buildAttachmentMarkdown(url, attachments[idx].name))
+          .join("\n");
+      } catch (uploadError) {
+        const message =
+          uploadError instanceof Error
+            ? uploadError.message
+            : "Could not upload attachments.";
+        setError(message);
+        setUploadingAttachments(false);
+        return;
+      }
+      setUploadingAttachments(false);
+    }
+
+    const finalContent = [previewContent, attachmentMarkdown]
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+
     setPending(true);
-    const err = await onSubmit(previewContent);
+    const err = await onSubmit(finalContent);
     setPending(false);
     if (err) { setError(err); return; }
     setContent("");
+    setAttachments([]);
+    setFileInputKey((k) => k + 1);
     setError(null);
+  }
+
+  function handleAttachmentChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const selected = Array.from(e.target.files ?? []);
+    if (selected.length === 0) return;
+    setAttachments((prev) => [...prev, ...selected]);
   }
 
   return (
@@ -260,6 +298,30 @@ function InlineCommentForm({
           className="forum-input comment-form-body"
         />
       </div>
+      <div className="mt-1">
+        <input
+          id={`comment-attachments-${fileInputKey}`}
+          key={fileInputKey}
+          type="file"
+          multiple
+          onChange={handleAttachmentChange}
+          className="hidden"
+        />
+        <label
+          htmlFor={`comment-attachments-${fileInputKey}`}
+          className="inline-flex cursor-pointer items-center gap-2 rounded border border-[var(--forum-border)] bg-[var(--forum-bg-secondary)] px-3 py-1.5 text-xs font-medium text-[var(--forum-text-secondary)] hover:bg-[var(--forum-hover)]"
+        >
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+            <path d="M21.44 11.05l-8.49 8.49a5.5 5.5 0 0 1-7.78-7.78l9.19-9.19a3.5 3.5 0 1 1 4.95 4.95l-9.2 9.19a1.5 1.5 0 0 1-2.12-2.12l8.48-8.48" />
+          </svg>
+          Attach files
+        </label>
+      </div>
+      {attachments.length > 0 && (
+        <p className="text-xs text-[var(--forum-text-muted)]">
+          {attachments.length} file attachment{attachments.length === 1 ? "" : "s"} selected.
+        </p>
+      )}
       {previewContent && (
         <div className="rounded border border-[var(--forum-border)] bg-[var(--forum-bg-secondary)] p-2">
           <p className="mb-1 text-xs font-medium text-[var(--forum-text-muted)]">Preview</p>
@@ -270,10 +332,10 @@ function InlineCommentForm({
       <div className="comment-form-actions">
         <button
           type="submit"
-          disabled={pending || !previewContent}
+          disabled={pending || uploadingAttachments || (!previewContent && attachments.length === 0)}
           className="forum-button disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {pending ? "Posting..." : "Post"}
+          {uploadingAttachments ? "Uploading files..." : pending ? "Posting..." : "Post"}
         </button>
         {onCancel && (
           <button type="button" onClick={onCancel} className="comment-text-btn">
