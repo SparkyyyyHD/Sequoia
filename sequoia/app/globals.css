@@ -471,6 +471,53 @@ body {
   white-space: pre-wrap;
 }
 
+.markdown-p {
+  margin: 0;
+}
+
+.markdown-p + .markdown-p {
+  margin-top: 0.5rem;
+}
+
+.markdown-image {
+  border-radius: 6px;
+  display: block;
+  height: auto;
+  margin-top: 0.5rem;
+  max-width: min(100%, 36rem);
+}
+
+.markdown-video-wrapper {
+  margin-top: 0.5rem;
+  max-width: min(100%, 42rem);
+  overflow: hidden;
+  position: relative;
+  width: 100%;
+}
+
+.markdown-video-wrapper::before {
+  content: "";
+  display: block;
+  padding-top: 56.25%;
+}
+
+.markdown-video-wrapper iframe {
+  border: 0;
+  height: 100%;
+  left: 0;
+  position: absolute;
+  top: 0;
+  width: 100%;
+}
+
+.markdown-video {
+  border-radius: 6px;
+  display: block;
+  margin-top: 0.5rem;
+  max-width: min(100%, 42rem);
+  width: 100%;
+}
+
 .comment-actions {
   display: flex;
   align-items: center;

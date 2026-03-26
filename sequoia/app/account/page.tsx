@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useAuth } from "@/components/AuthProvider";
+import MarkdownContent from "@/components/MarkdownContent";
 import { supabase } from "@/lib/supabase";
 import {
   getForumSubsectionHref,
@@ -372,9 +373,10 @@ export default function AccountPage() {
                 return (
                   <li key={post.id} className="forum-subsection-card p-3">
                     <p className="text-xs text-[var(--forum-text-muted)]">{label}</p>
-                    <p className="mt-1 whitespace-pre-wrap text-sm text-[var(--forum-text-primary)]">
-                      {post.content}
-                    </p>
+                    <MarkdownContent
+                      content={post.content}
+                      className="mt-1 text-sm text-[var(--forum-text-primary)]"
+                    />
                     <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--forum-text-muted)]">
                       <span>
                         {new Date(post.created_at).toLocaleDateString(undefined, {

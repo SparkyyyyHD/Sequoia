@@ -6,6 +6,10 @@ import { supabase } from "@/lib/supabase";
 import { getOrCreateVoterKey } from "@/lib/voterKey";
 import { fetchComments, type Comment } from "@/lib/comments";
 import { useAuth } from "@/components/AuthProvider";
+import MarkdownContent from "@/components/MarkdownContent";
+import {
+  convertContentForSubmit,
+} from "@/lib/markdown";
 
 export default function CommentSection({ postId }: { postId: string }) {
   const { user, displayName, isGuest } = useAuth();
@@ -79,13 +83,49 @@ export default function CommentSection({ postId }: { postId: string }) {
     return null;
   }
 
-  const topLevel = comments.filter((c) => !c.parent_id);
-  const replies = comments.reduce<Record<string, Comment[]>>((acc, c) => {
+  // Build a map of parent_id -> children
+  const childrenMap = comments.reduce<Record<string, Comment[]>>((acc, c) => {
     if (c.parent_id) {
       acc[c.parent_id] = [...(acc[c.parent_id] ?? []), c];
     }
     return acc;
   }, {});
+
+  function renderComments(parentId: string | null, depth = 0) {
+    const items = comments.filter((c) => c.parent_id === parentId);
+    if (items.length === 0) return null;
+    return (
+      <div className={parentId ? "comment-replies" : undefined}>
+        {items.map((comment) => (
+          <div key={comment.id}>
+            <CommentItem
+              comment={comment}
+              liked={myLikes.has(comment.id)}
+              likeCount={likeCounts[comment.id] ?? 0}
+              onLike={() => toggleLike(comment.id)}
+              onReply={
+                canComment
+                  ? () => setReplyingTo(replyingTo === comment.id ? null : comment.id)
+                  : undefined
+              }
+              replyActive={replyingTo === comment.id}
+            />
+            {renderComments(comment.id, depth + 1)}
+            {replyingTo === comment.id && canComment && (
+              <div className="comment-reply-form">
+                <InlineCommentForm
+                  placeholder={`Reply to ${comment.author_name ?? "Anonymous"}...`}
+                  onSubmit={(c) => submitComment(c, comment.id)}
+                  onCancel={() => setReplyingTo(null)}
+                  displayName={displayName}
+                />
+              </div>
+            )}
+          </div>
+        ))}
+      </div>
+    );
+  }
 
   if (loading) {
     return <p className="text-xs text-[var(--forum-text-muted)]">Loading comments...</p>;
@@ -93,52 +133,10 @@ export default function CommentSection({ postId }: { postId: string }) {
 
   return (
     <div className="comment-section">
-      {topLevel.length === 0 && (
+      {comments.filter((c) => !c.parent_id).length === 0 && (
         <p className="text-xs text-[var(--forum-text-muted)]">No comments yet.</p>
       )}
-
-      {topLevel.map((comment) => (
-        <div key={comment.id}>
-          <CommentItem
-            comment={comment}
-            liked={myLikes.has(comment.id)}
-            likeCount={likeCounts[comment.id] ?? 0}
-            onLike={() => toggleLike(comment.id)}
-            onReply={
-              canComment
-                ? () => setReplyingTo(replyingTo === comment.id ? null : comment.id)
-                : undefined
-            }
-            replyActive={replyingTo === comment.id}
-          />
-
-          {(replies[comment.id] ?? []).length > 0 && (
-            <div className="comment-replies">
-              {replies[comment.id].map((reply) => (
-                <CommentItem
-                  key={reply.id}
-                  comment={reply}
-                  liked={myLikes.has(reply.id)}
-                  likeCount={likeCounts[reply.id] ?? 0}
-                  onLike={() => toggleLike(reply.id)}
-                />
-              ))}
-            </div>
-          )}
-
-          {replyingTo === comment.id && canComment && (
-            <div className="comment-reply-form">
-              <InlineCommentForm
-                placeholder={`Reply to ${comment.author_name ?? "Anonymous"}...`}
-                onSubmit={(c) => submitComment(c, comment.id)}
-                onCancel={() => setReplyingTo(null)}
-                displayName={displayName}
-              />
-            </div>
-          )}
-        </div>
-      ))}
-
+      {renderComments(null)}
       <div className="comment-add-form">
         {canComment ? (
           <InlineCommentForm
@@ -190,7 +188,7 @@ function CommentItem({
           })}
         </span>
       </div>
-      <p className="comment-content">{comment.content}</p>
+      <MarkdownContent content={comment.content} className="comment-content" />
       <div className="comment-actions">
         <button
           type="button"
@@ -223,12 +221,13 @@ function InlineCommentForm({
   const [content, setContent] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const previewContent = convertContentForSubmit(content);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
-    if (!content.trim()) return;
+    if (!previewContent) return;
     setPending(true);
-    const err = await onSubmit(content);
+    const err = await onSubmit(previewContent);
     setPending(false);
     if (err) { setError(err); return; }
     setContent("");
@@ -251,15 +250,20 @@ function InlineCommentForm({
           value={content}
           onChange={(e) => setContent(e.target.value)}
           rows={2}
-          required
           className="forum-input comment-form-body"
         />
       </div>
+      {previewContent && (
+        <div className="rounded border border-[var(--forum-border)] bg-[var(--forum-bg-secondary)] p-2">
+          <p className="mb-1 text-xs font-medium text-[var(--forum-text-muted)]">Preview</p>
+          <MarkdownContent content={previewContent} className="comment-content" />
+        </div>
+      )}
       {error && <p className="text-xs text-[var(--forum-error)]">{error}</p>}
       <div className="comment-form-actions">
         <button
           type="submit"
-          disabled={pending || !content.trim()}
+          disabled={pending || !previewContent}
           className="forum-button disabled:opacity-50 disabled:cursor-not-allowed"
         >
           {pending ? "Posting..." : "Post"}

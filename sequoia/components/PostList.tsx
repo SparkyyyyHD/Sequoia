@@ -13,6 +13,7 @@ import type { Post } from "@/lib/postTypes";
 import PostVoteBar from "@/components/PostVoteBar";
 import CommentSection from "@/components/CommentSection";
 import ShareButton from "@/components/ShareButton";
+import MarkdownContent from "@/components/MarkdownContent";
 
 interface PostListProps {
   posts: Post[];
@@ -88,9 +89,10 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
                 </Link>
               </p>
             )}
-            <p className="whitespace-pre-wrap text-sm leading-relaxed text-[var(--forum-text-primary)]">
-              {post.content}
-            </p>
+            <MarkdownContent
+              content={post.content}
+              className="text-sm leading-relaxed text-[var(--forum-text-primary)]"
+            />
             <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--forum-text-muted)]">
               <span>{post.author_name ?? "Anonymous"}</span>
               <span>

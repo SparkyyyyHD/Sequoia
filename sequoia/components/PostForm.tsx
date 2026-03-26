@@ -5,6 +5,10 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { useAuth } from "@/components/AuthProvider";
+import MarkdownContent from "@/components/MarkdownContent";
+import {
+  convertContentForSubmit,
+} from "@/lib/markdown";
 
 interface PostFormProps {
   category: string;
@@ -17,6 +21,7 @@ export default function PostForm({ category, subcategory }: PostFormProps) {
   const [content, setContent] = useState("");
   const [isPending, startTransition] = useTransition();
   const [error, setError] = useState<string | null>(null);
+  const previewContent = convertContentForSubmit(content);
 
   if (loading) return null;
 
@@ -39,13 +44,13 @@ export default function PostForm({ category, subcategory }: PostFormProps) {
     e.preventDefault();
     setError(null);
 
-    const trimmed = content.trim();
-    if (!trimmed) return;
+    const finalContent = convertContentForSubmit(content);
+    if (!finalContent) return;
 
     const { error: insertError } = await supabase.from("posts").insert({
       category,
       subcategory,
-      content: trimmed,
+      content: finalContent,
       author_name: displayName,
     });
 
@@ -76,14 +81,22 @@ export default function PostForm({ category, subcategory }: PostFormProps) {
         value={content}
         onChange={(e) => setContent(e.target.value)}
         rows={3}
-        required
         className="forum-input min-h-[4.5rem] resize-y"
       />
+      {previewContent && (
+        <div className="mt-3 rounded border border-[var(--forum-border)] bg-[var(--forum-bg-secondary)] p-3">
+          <p className="mb-1 text-xs font-medium text-[var(--forum-text-muted)]">Preview</p>
+          <MarkdownContent
+            content={previewContent}
+            className="text-sm leading-relaxed text-[var(--forum-text-primary)]"
+          />
+        </div>
+      )}
       {error && <p className="mt-2 text-sm text-[var(--forum-error)]">{error}</p>}
       <div className="mt-3 flex justify-end">
         <button
           type="submit"
-          disabled={isPending || !content.trim()}
+          disabled={isPending || !previewContent}
           className="forum-button disabled:cursor-not-allowed disabled:opacity-50"
         >
           {isPending ? "Submitting..." : "Post"}
