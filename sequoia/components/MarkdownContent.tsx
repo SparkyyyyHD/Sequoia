@@ -51,14 +51,15 @@ export default function MarkdownContent({ content, className }: MarkdownContentP
               </a>
             );
           },
-          img: ({ src, alt }) => (
-            <img
-              src={src ?? ""}
-              alt={alt ?? "Embedded image"}
-              className="markdown-image"
-              loading="lazy"
-            />
-          ),
+          img: ({ src, alt }) =>
+            src ? (
+              <img
+                src={src}
+                alt={alt ?? "Embedded image"}
+                className="markdown-image"
+                loading="lazy"
+              />
+            ) : null,
         }}
       >
         {content}

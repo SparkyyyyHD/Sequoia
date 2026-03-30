@@ -2,8 +2,8 @@
 
 import { useEffect, useState } from "react";
 import {
-  forumKey,
   getJoinedForums,
+  getForumSectionKey,
   toggleJoinedForum,
   JOINED_FORUMS_CHANGE_EVENT,
 } from "@/lib/joinedForums";
@@ -20,19 +20,13 @@ export default function JoinForumButton({
   category,
   subsection,
 }: JoinForumButtonProps) {
-  // Technical join only for a specific skill node (field__skill). Life: any non-empty skill slug.
-  if (
-    (category === "technical-advice" && !subsection.includes("__")) ||
-    (category === "life-advice" && !subsection)
-  ) {
-    return null;
-  }
-
-  const key = forumKey(category, subsection);
-  const [joined, setJoined] = useState(false);
+  const key = subsection ? getForumSectionKey(category, subsection) : "";
+  const [joined, setJoined] = useState(() =>
+    subsection ? getJoinedForums().has(key) : false
+  );
 
   useEffect(() => {
-    setJoined(getJoinedForums().has(key));
+    if (!subsection) return;
 
     function onJoinedChange() {
       setJoined(getJoinedForums().has(key));
@@ -40,7 +34,11 @@ export default function JoinForumButton({
 
     window.addEventListener(JOINED_FORUMS_CHANGE_EVENT, onJoinedChange);
     return () => window.removeEventListener(JOINED_FORUMS_CHANGE_EVENT, onJoinedChange);
-  }, [key]);
+  }, [key, subsection]);
+
+  if (!subsection) {
+    return null;
+  }
 
   function handleClick(e: React.MouseEvent) {
     e.preventDefault();

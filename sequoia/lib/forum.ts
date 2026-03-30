@@ -1,6 +1,8 @@
 import {
   buildTechnicalSkillSubsection,
+  getLifeSkillPillar,
   getLifeSkillNode,
+  getLifeSectionSlug,
   getTechnicalSkillNode,
   parseTechnicalSkillSubsection,
   LIFE_SKILL_TREE,
@@ -101,17 +103,19 @@ export function parseTechnicalTierSubsection(subsectionSlug: string): {
   return parseTechnicalSkillSubsection(subsectionSlug);
 }
 
+/** Section-level forum URL only (no per-skill / per-node routes). */
 export function getForumSubsectionHref(
   categorySlug: ForumCategorySlug,
   subsectionSlug: string
 ): string {
   if (categorySlug === "life-advice") {
-    return `/forum/life-advice/${subsectionSlug}`;
+    const pillar = getLifeSectionSlug(subsectionSlug);
+    return `/forum/life-advice/${pillar ?? subsectionSlug}`;
   }
 
   const parsed = parseTechnicalSkillSubsection(subsectionSlug);
   if (parsed) {
-    return `/forum/technical-advice/${parsed.fieldSlug}/${parsed.skillSlug}`;
+    return `/forum/technical-advice/${parsed.fieldSlug}`;
   }
   return `/forum/technical-advice/${subsectionSlug}`;
 }
@@ -121,6 +125,8 @@ export function getSubsectionLabel(
   subsectionSlug: string
 ): string {
   if (categorySlug === "life-advice") {
+    const pillar = getLifeSkillPillar(subsectionSlug);
+    if (pillar) return pillar.label;
     const node = getLifeSkillNode(subsectionSlug);
     if (node) return node.label;
   }

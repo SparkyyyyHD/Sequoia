@@ -515,7 +515,7 @@ export interface LifeSkillPillar {
 export const LIFE_SKILL_PILLARS: LifeSkillPillar[] = [
   {
     slug: "relationships",
-    label: "Relationships & intimacy",
+    label: "Relationships",
     description: "A clearer arc from self-awareness to friendship, dating, conflict repair, and long-term partnership.",
     nodes: [
       {
@@ -612,7 +612,7 @@ export const LIFE_SKILL_PILLARS: LifeSkillPillar[] = [
   },
   {
     slug: "family",
-    label: "Family & caregiving",
+    label: "Family",
     description: "A family arc from inherited patterns and partner alignment into parenting, caregiving, and coverage systems.",
     nodes: [
       {
@@ -691,7 +691,7 @@ export const LIFE_SKILL_PILLARS: LifeSkillPillar[] = [
   },
   {
     slug: "education",
-    label: "Education & learning",
+    label: "Education",
     description: "A learning arc from study habits into research, testing, applications, aid, and long-term skill building.",
     nodes: [
       {
@@ -770,7 +770,7 @@ export const LIFE_SKILL_PILLARS: LifeSkillPillar[] = [
   },
   {
     slug: "career",
-    label: "Career & work",
+    label: "Career",
     description: "A career arc from self-inventory into search, interviewing, negotiation, growth, and eventual pivots.",
     nodes: [
       {
@@ -855,7 +855,7 @@ export const LIFE_SKILL_PILLARS: LifeSkillPillar[] = [
   },
   {
     slug: "money",
-    label: "Money & taxes",
+    label: "Money",
     description: "A money arc from basic accounts into budgeting, taxes, debt, investing, shared finances, and protection.",
     nodes: [
       {
@@ -934,7 +934,7 @@ export const LIFE_SKILL_PILLARS: LifeSkillPillar[] = [
   },
   {
     slug: "housing",
-    label: "Housing & independence",
+    label: "Housing",
     description: "A housing arc from priorities and leases into maintenance, boundaries, and eventually buying.",
     nodes: [
       {
@@ -1013,7 +1013,7 @@ export const LIFE_SKILL_PILLARS: LifeSkillPillar[] = [
   },
   {
     slug: "health",
-    label: "Health, mind & body",
+    label: "Health",
     description: "A health arc from basic habits into care access, mental health support, and long-term resilience.",
     nodes: [
       {
@@ -1092,7 +1092,7 @@ export const LIFE_SKILL_PILLARS: LifeSkillPillar[] = [
   },
   {
     slug: "community",
-    label: "Community & purpose",
+    label: "Community",
     description: "A community arc from personal values into service, civic life, creative contribution, and legacy.",
     nodes: [
       {
@@ -1189,12 +1189,24 @@ export function getLifeSkillNode(slug: string): SkillTreeNode | undefined {
   return lifeBySlug.get(slug);
 }
 
+export function getLifeSkillPillar(slug: string): LifeSkillPillar | undefined {
+  return LIFE_SKILL_PILLARS.find((pillar) => pillar.slug === slug);
+}
+
 export function getLifeSkillPillarBySkillSlug(
   skillSlug: string
 ): LifeSkillPillar | undefined {
   return LIFE_SKILL_PILLARS.find((pillar) =>
     pillar.nodes.some((node) => node.slug === skillSlug)
   );
+}
+
+export function getLifeSectionSlug(skillOrSectionSlug: string): string | null {
+  if (getLifeSkillPillar(skillOrSectionSlug)) {
+    return skillOrSectionSlug;
+  }
+
+  return getLifeSkillPillarBySkillSlug(skillOrSectionSlug)?.slug ?? null;
 }
 
 export function getTechnicalSkillNode(

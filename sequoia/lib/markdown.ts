@@ -77,7 +77,8 @@ function wrapUrlAsMarkdown(url: string): string {
 }
 
 export function convertPastedTextToMarkdown(text: string): string {
-  const urlRegex = /(https?:\/\/[^\s<>\")\]]+|blob:[^\s<>\")\]]+)/gi;
+  // Negative lookbehind (?<!\]\() skips URLs already inside markdown link/image syntax [...](...url...)
+  const urlRegex = /(?<!\]\()(https?:\/\/[^\s<>\")\]]+|blob:[^\s<>\")\]]+)/gi;
 
   return text.replace(urlRegex, (match) => {
     if (!isLikelyUrl(match)) return match;

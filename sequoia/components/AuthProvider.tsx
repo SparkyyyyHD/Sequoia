@@ -8,12 +8,15 @@ import {
   createGuestAccount,
   signInGuest,
   signOutGuest,
+  getGuestAvatarUrl,
+  setGuestAvatarUrl,
 } from "@/lib/guestAuth";
 
 interface AuthContextType {
   user: User | null;
   loading: boolean;
   displayName: string | null;
+  avatarUrl: string | null;
   isGuest: boolean;
   signOut: () => Promise<void>;
   signInAsGuest: (
@@ -21,27 +24,39 @@ interface AuthContextType {
     password: string,
     isNew: boolean
   ) => Promise<{ error: string | null }>;
+  /** Call after a successful avatar upload to update the UI immediately. */
+  setAvatarUrl: (url: string) => void;
 }
 
 const AuthContext = createContext<AuthContextType>({
   user: null,
   loading: true,
   displayName: null,
+  avatarUrl: null,
   isGuest: false,
   signOut: async () => {},
   signInAsGuest: async () => ({ error: null }),
+  setAvatarUrl: () => {},
 });
 
 export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [loading, setLoading] = useState(true);
   const [guestUsername, setGuestUsername] = useState<string | null>(null);
+  const [guestAvatarUrl, setGuestAvatarUrlState] = useState<string | null>(null);
+  // Immediate override so the navbar updates the instant upload finishes,
+  // without waiting for onAuthStateChange to propagate new user metadata.
+  const [avatarUrlOverride, setAvatarUrlOverride] = useState<string | null>(null);
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data: { session } }) => {
       setUser(session?.user ?? null);
       if (!session?.user) {
-        setGuestUsername(getGuestSession());
+        const username = getGuestSession();
+        setGuestUsername(username);
+        if (username) {
+          setGuestAvatarUrlState(getGuestAvatarUrl(username));
+        }
       }
       setLoading(false);
     });
@@ -52,6 +67,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setUser(session?.user ?? null);
       if (session?.user) {
         setGuestUsername(null);
+        setGuestAvatarUrlState(null);
+        // Once auth state propagates the new metadata, drop the override so
+        // the canonical value takes over.
+        setAvatarUrlOverride(null);
       }
     });
 
@@ -62,6 +81,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     await supabase.auth.signOut();
     signOutGuest();
     setGuestUsername(null);
+    setGuestAvatarUrlState(null);
+    setAvatarUrlOverride(null);
   };
 
   const signInAsGuest = useCallback(
@@ -72,10 +93,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
       if (!result.error) {
         setGuestUsername(username);
+        setGuestAvatarUrlState(getGuestAvatarUrl(username));
       }
       return result;
     },
     []
+  );
+
+  const setAvatarUrl = useCallback(
+    (url: string) => {
+      setAvatarUrlOverride(url);
+      if (guestUsername) {
+        setGuestAvatarUrl(guestUsername, url);
+        setGuestAvatarUrlState(url);
+      }
+    },
+    [guestUsername]
   );
 
   const isGuest = !user && guestUsername !== null;
@@ -86,9 +119,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     guestUsername ??
     null;
 
+  // Override wins immediately after upload; falls back to auth metadata or
+  // persisted guest URL once the override is cleared.
+  const avatarUrl =
+    avatarUrlOverride ||
+    (user?.user_metadata?.avatar_url as string | undefined) ||
+    guestAvatarUrl ||
+    null;
+
   return (
     <AuthContext.Provider
-      value={{ user, loading, displayName, isGuest, signOut, signInAsGuest }}
+      value={{ user, loading, displayName, avatarUrl, isGuest, signOut, signInAsGuest, setAvatarUrl }}
     >
       {children}
     </AuthContext.Provider>

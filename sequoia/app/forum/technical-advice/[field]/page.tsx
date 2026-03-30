@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { notFound } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import {
@@ -11,10 +10,10 @@ import {
   topoSortSkillTree,
   type TechnicalFieldSlug,
 } from "@/lib/skillTrees";
-import PostList from "@/components/PostList";
-import PostForm from "@/components/PostForm";
+import JoinedSectionFeed from "@/components/JoinedSectionFeed";
 import FavoriteButton from "@/components/FavoriteButton";
 import JoinForumButton from "@/components/JoinForumButton";
+import { POST_LIST_FIELDS } from "@/lib/postSelect";
 
 const TECHNICAL_ADVICE = getForumCategory("technical-advice");
 
@@ -35,14 +34,16 @@ export default async function ForumFieldPage({
   }
 
   const orderedSkills = topoSortSkillTree(tree);
+  const sectionSubsections = [
+    field,
+    ...orderedSkills.map((skill) => buildTechnicalSkillSubsection(field, skill.slug)),
+  ];
 
   const { data: posts } = await supabase
     .from("posts")
-    .select(
-      "id, content, author_name, created_at, helpful_count, not_helpful_count, category, subcategory"
-    )
+    .select(POST_LIST_FIELDS)
     .eq("category", "technical-advice")
-    .eq("subcategory", field)
+    .in("subcategory", sectionSubsections)
     .order("created_at", { ascending: false });
 
   const label = getSubsectionLabel("technical-advice", field);
@@ -57,7 +58,8 @@ export default async function ForumFieldPage({
               {label}
             </h1>
             <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
-              Pick a skill node to join conversations that match where you are in the tree.
+              One section for the whole field. Skill names are tags on posts—use search, the menu, or
+              topic chips to narrow the feed.
             </p>
           </div>
           <div className="flex items-center gap-1">
@@ -67,40 +69,21 @@ export default async function ForumFieldPage({
         </div>
       </header>
 
-      <section className="mt-4 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {orderedSkills.map((skill) => (
-          <div key={skill.slug} className="forum-subsection-card relative p-3">
-            <div className="flex items-start justify-between gap-2">
-              <Link
-                href={`/forum/technical-advice/${field}/${skill.slug}`}
-                className="forum-stretched-link text-sm font-medium text-[var(--forum-text-primary)]"
-              >
-                {skill.label}
-              </Link>
-              <JoinForumButton
-                category="technical-advice"
-                subsection={buildTechnicalSkillSubsection(field, skill.slug)}
-              />
-            </div>
-            <p className="mt-0.5 text-xs text-[var(--forum-text-secondary)]">
-              {skill.description}
-            </p>
-          </div>
-        ))}
-      </section>
-
-      <section className="mt-5">
-        <header className="forum-card p-3 sm:p-4">
-          <h2 className="text-sm font-semibold text-[var(--forum-text-primary)]">
-            General threads (whole field)
-          </h2>
-          <p className="mt-0.5 text-xs text-[var(--forum-text-secondary)]">
-            Broad or cross-topic discussions for {label}.
-          </p>
-        </header>
-        <PostForm category="technical-advice" subcategory={field} />
-        <PostList posts={posts ?? []} />
-      </section>
+      <JoinedSectionFeed
+        category="technical-advice"
+        subcategory={field}
+        posts={(posts ?? [])}
+        showSubsectionLink
+        feedNodeOptions={[
+          { value: "", label: "All threads" },
+          { value: field, label: "General" },
+          ...orderedSkills.map((skill) => ({
+            value: buildTechnicalSkillSubsection(field, skill.slug),
+            label: skill.label,
+          })),
+        ]}
+        lockedMessage={`Join ${label} to read and post in this section.`}
+      />
     </>
   );
 }

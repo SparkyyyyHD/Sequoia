@@ -34,7 +34,7 @@ export default function ForumTechnicalAdvicePage() {
                 {subsection.label}
               </Link>
               <div className="flex items-center gap-1">
-                {/* No JoinForumButton for global forum */}
+                <JoinForumButton category="technical-advice" subsection={subsection.slug} />
                 <FavoriteButton category="technical-advice" subsection={subsection.slug} />
               </div>
             </div>

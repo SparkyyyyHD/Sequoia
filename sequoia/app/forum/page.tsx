@@ -2,7 +2,8 @@ import { getRecommendedCandidates } from "@/lib/recommendedPosts";
 import RecommendedPosts from "@/components/RecommendedPosts";
 
 export default async function ForumHomePage() {
-  const candidates = await getRecommendedCandidates(40);
+  const candidates = await getRecommendedCandidates(120);
+  const recommendationSeed = crypto.randomUUID();
 
   return (
     <>
@@ -11,7 +12,7 @@ export default async function ForumHomePage() {
       </header>
 
       <section className="mt-4">
-        <RecommendedPosts candidates={candidates} limit={20} />
+        <RecommendedPosts candidates={candidates} limit={20} seed={recommendationSeed} />
       </section>
     </>
   );

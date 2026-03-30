@@ -4,16 +4,16 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateVoterKey } from "@/lib/voterKey";
-import {
-  getForumSubsectionHref,
-  getSubsectionLabel,
-  type ForumCategorySlug,
-} from "@/lib/forum";
+import { getSubsectionLabel, type ForumCategorySlug } from "@/lib/forum";
 import type { Post } from "@/lib/postTypes";
 import PostVoteBar from "@/components/PostVoteBar";
 import CommentSection from "@/components/CommentSection";
 import ShareButton from "@/components/ShareButton";
 import MarkdownContent from "@/components/MarkdownContent";
+import AuthorAvatar from "@/components/AuthorAvatar";
+import PostTitleAndTags from "@/components/PostTitleAndTags";
+import { getDisplayPostBody } from "@/lib/postTags";
+import { fetchAvatarUrls } from "@/lib/profiles";
 
 interface PostListProps {
   posts: Post[];
@@ -24,6 +24,7 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
   const [myVotes, setMyVotes] = useState<Record<string, 1 | -1>>({});
   const [openComments, setOpenComments] = useState<Set<string>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
+  const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
   const idsKey = useMemo(() => posts.map((p) => p.id).sort().join(","), [posts]);
 
   useEffect(() => {
@@ -80,6 +81,12 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
     return () => { cancelled = true; };
   }, [idsKey, posts]);
 
+  useEffect(() => {
+    const names = posts.map((p) => p.author_name).filter(Boolean) as string[];
+    if (names.length === 0) return;
+    fetchAvatarUrls(names).then(setAvatarUrls);
+  }, [idsKey, posts]);
+
   function handleMyVoteUpdate(postId: string, vote: 1 | -1 | null) {
     setMyVotes((prev) => {
       const copy = { ...prev };
@@ -92,7 +99,8 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
   function toggleComments(postId: string) {
     setOpenComments((prev) => {
       const next = new Set(prev);
-      next.has(postId) ? next.delete(postId) : next.add(postId);
+      if (next.has(postId)) next.delete(postId);
+      else next.add(postId);
       return next;
     });
   }
@@ -104,66 +112,85 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
   }
 
   return (
-    <ul className="mt-2 space-y-2">
+    <ul className="mt-3 space-y-3">
       {posts.map((post) => {
         const cat = post.category;
         const sub = post.subcategory;
         const subsectionLabel =
           cat && sub ? getSubsectionLabel(cat as ForumCategorySlug, sub) : null;
-        const subsectionHref =
-          cat && sub ? getForumSubsectionHref(cat as ForumCategorySlug, sub) : null;
         const commentsOpen = openComments.has(post.id);
 
         return (
-          <li key={post.id} id={`post-${post.id}`} className="forum-card p-3 sm:p-4">
-            {showSubsectionLink && subsectionHref && subsectionLabel && (
-              <p className="mb-1.5 text-xs text-[var(--forum-text-muted)]">
-                <Link href={subsectionHref} className="forum-link">
-                  {cat === "life-advice" ? "Life advice" : "Technical advice"} &middot; {subsectionLabel}
-                </Link>
-              </p>
-            )}
-            <MarkdownContent
-              content={post.content}
-              className="text-sm leading-relaxed text-[var(--forum-text-primary)]"
-            />
-            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--forum-text-muted)]">
-              <span>{post.author_name ?? "Anonymous"}</span>
-              <span>
-                {new Date(post.created_at).toLocaleDateString(undefined, {
-                  month: "short",
-                  day: "numeric",
-                  year: "numeric",
-                })}
-              </span>
-            </div>
-            <PostVoteBar
-              postId={post.id}
-              helpfulCount={post.helpful_count ?? 0}
-              notHelpfulCount={post.not_helpful_count ?? 0}
-              myVote={myVotes[post.id]}
-              onMyVoteUpdate={handleMyVoteUpdate}
-            />
-            <div className="post-actions">
-              <button
-                type="button"
-                onClick={() => toggleComments(post.id)}
-                className={`post-action-btn${commentsOpen ? " post-action-btn--active" : ""}`}
-              >
-                Comments ({commentCounts[post.id] ?? 0})
-              </button>
-              <ShareButton postId={post.id} />
-            </div>
-            {commentsOpen && (
-              <div className="mt-3 border-t border-[var(--forum-border)] pt-3">
-                <CommentSection
-                  postId={post.id}
-                  onCountChange={(count) =>
-                    setCommentCounts((prev) => ({ ...prev, [post.id]: count }))
-                  }
+          <li key={post.id} id={`post-${post.id}`} className="forum-post-card forum-card p-4 sm:p-5">
+            <div className="flex gap-3">
+              <AuthorAvatar
+                name={post.author_name}
+                src={post.author_name ? avatarUrls[post.author_name] : undefined}
+                size="md"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                  <span className="text-sm font-semibold text-[var(--forum-text-primary)]">
+                    {post.author_name?.trim() || "Anonymous"}
+                  </span>
+                  <time
+                    dateTime={post.created_at}
+                    className="text-xs text-[var(--forum-text-muted)]"
+                  >
+                    {new Date(post.created_at).toLocaleDateString(undefined, {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </time>
+                  <Link
+                    href={`/forum/post/${post.id}`}
+                    className="ml-auto text-xs text-[var(--forum-text-muted)] hover:text-[var(--forum-accent)] hover:underline"
+                  >
+                    View thread
+                  </Link>
+                </div>
+                {showSubsectionLink && subsectionLabel && (
+                  <p className="mt-1.5">
+                    <span className="forum-post-topic-tag" title="Topic tag for this post">
+                      {subsectionLabel}
+                    </span>
+                  </p>
+                )}
+                <PostTitleAndTags post={post} headingLevel={2} className="mt-2" />
+                <MarkdownContent
+                  content={getDisplayPostBody(post)}
+                  className="mt-3 text-[0.9375rem] leading-relaxed text-[var(--forum-text-primary)]"
                 />
+                <PostVoteBar
+                  postId={post.id}
+                  helpfulCount={post.helpful_count ?? 0}
+                  notHelpfulCount={post.not_helpful_count ?? 0}
+                  myVote={myVotes[post.id]}
+                  onMyVoteUpdate={handleMyVoteUpdate}
+                />
+                <div className="post-actions">
+                  <button
+                    type="button"
+                    onClick={() => toggleComments(post.id)}
+                    className={`post-action-btn${commentsOpen ? " post-action-btn--active" : ""}`}
+                  >
+                    Comments ({commentCounts[post.id] ?? 0})
+                  </button>
+                  <ShareButton postId={post.id} />
+                </div>
+                {commentsOpen && (
+                  <div className="mt-3 border-t border-[var(--forum-border)] pt-3">
+                    <CommentSection
+                      postId={post.id}
+                      onCountChange={(count) =>
+                        setCommentCounts((prev) => ({ ...prev, [post.id]: count }))
+                      }
+                    />
+                  </div>
+                )}
               </div>
-            )}
+            </div>
           </li>
         );
       })}

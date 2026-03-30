@@ -10,11 +10,9 @@ interface FavoriteButtonProps {
 
 export default function FavoriteButton({ category, subsection }: FavoriteButtonProps) {
   const key = subsectionKey(category, subsection);
-  const [favorited, setFavorited] = useState(false);
+  const [favorited, setFavorited] = useState(() => getFavorites().has(key));
 
   useEffect(() => {
-    setFavorited(getFavorites().has(key));
-
     function onFavoritesChange() {
       setFavorited(getFavorites().has(key));
     }

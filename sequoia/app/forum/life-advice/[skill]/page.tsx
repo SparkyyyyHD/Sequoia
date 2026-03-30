@@ -1,10 +1,13 @@
-import { notFound } from "next/navigation";
+import { notFound, redirect } from "next/navigation";
 import { supabase } from "@/lib/supabase";
-import { getLifeSkillNode } from "@/lib/skillTrees";
-import PostList from "@/components/PostList";
-import PostForm from "@/components/PostForm";
-import FavoriteButton from "@/components/FavoriteButton";
+import {
+  getLifeSkillNode,
+  getLifeSkillPillar,
+  getLifeSkillPillarBySkillSlug,
+} from "@/lib/skillTrees";
+import JoinedSectionFeed from "@/components/JoinedSectionFeed";
 import JoinForumButton from "@/components/JoinForumButton";
+import { POST_LIST_FIELDS } from "@/lib/postSelect";
 
 export default async function ForumLifeSkillPage({
   params,
@@ -12,18 +15,30 @@ export default async function ForumLifeSkillPage({
   params: Promise<{ skill: string }>;
 }) {
   const { skill } = await params;
-  const meta = getLifeSkillNode(skill);
-  if (!meta) {
+  const sectionMeta = getLifeSkillPillar(skill);
+  const skillMeta = getLifeSkillNode(skill);
+
+  if (!sectionMeta && !skillMeta) {
     notFound();
   }
 
+  if (!sectionMeta && skillMeta) {
+    const pillar = getLifeSkillPillarBySkillSlug(skill);
+    if (!pillar) notFound();
+    redirect(`/forum/life-advice/${pillar.slug}`);
+  }
+
+  if (!sectionMeta) {
+    notFound();
+  }
+
+  const sectionSkills = sectionMeta.nodes;
+  const postSubsections = [sectionMeta.slug, ...sectionMeta.nodes.map((node) => node.slug)];
   const { data: posts } = await supabase
     .from("posts")
-    .select(
-      "id, content, author_name, created_at, helpful_count, not_helpful_count, category, subcategory"
-    )
+    .select(POST_LIST_FIELDS)
     .eq("category", "life-advice")
-    .eq("subcategory", skill)
+    .in("subcategory", postSubsections)
     .order("created_at", { ascending: false });
 
   return (
@@ -33,21 +48,36 @@ export default async function ForumLifeSkillPage({
           <div>
             <p className="forum-kicker">Life advice</p>
             <h1 className="mt-0.5 text-lg font-semibold text-[var(--forum-text-primary)]">
-              {meta.label}
+              {sectionMeta.label}
             </h1>
             <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
-              {meta.description}
+              {sectionMeta.description}
+            </p>
+            <p className="mt-2 text-xs text-[var(--forum-text-muted)]">
+              Topics are tags for posts—everything lives in this section. Use search and filters below.
             </p>
           </div>
           <div className="flex items-center gap-1">
-            <JoinForumButton category="life-advice" subsection={skill} />
-            <FavoriteButton category="life-advice" subsection={skill} />
+            <JoinForumButton category="life-advice" subsection={sectionMeta.slug} />
           </div>
         </div>
       </header>
 
-      <PostForm category="life-advice" subcategory={skill} />
-      <PostList posts={posts ?? []} />
+      <JoinedSectionFeed
+        category="life-advice"
+        subcategory={sectionMeta.slug}
+        posts={(posts ?? [])}
+        showSubsectionLink
+        feedNodeOptions={[
+          { value: "", label: "All topics" },
+          { value: sectionMeta.slug, label: "General" },
+          ...sectionSkills.map((node) => ({
+            value: node.slug,
+            label: node.label,
+          })),
+        ]}
+        lockedMessage={`Join ${sectionMeta.label} to read and post in this section.`}
+      />
     </>
   );
 }

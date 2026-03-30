@@ -1,5 +1,6 @@
 const GUEST_ACCOUNTS_KEY = "sequoia_guest_accounts";
 const GUEST_SESSION_KEY = "sequoia_guest_session";
+const GUEST_AVATAR_PREFIX = "sequoia_guest_avatar_";
 
 type GuestAccounts = Record<string, { passwordHash: string }>;
 
@@ -63,4 +64,14 @@ export async function signInGuest(
 export function signOutGuest(): void {
   if (typeof window === "undefined") return;
   localStorage.removeItem(GUEST_SESSION_KEY);
+}
+
+export function getGuestAvatarUrl(username: string): string | null {
+  if (typeof window === "undefined") return null;
+  return localStorage.getItem(GUEST_AVATAR_PREFIX + username);
+}
+
+export function setGuestAvatarUrl(username: string, url: string): void {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(GUEST_AVATAR_PREFIX + username, url);
 }

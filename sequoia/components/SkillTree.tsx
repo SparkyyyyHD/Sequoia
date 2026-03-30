@@ -4,6 +4,7 @@ import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
 import { OrthographicCamera } from '@react-three/drei';
 import { Bloom, EffectComposer, Noise, Vignette } from '@react-three/postprocessing';
 import { useRouter } from 'next/navigation';
+import { getForumSectionKey, getJoinedForums, JOINED_FORUMS_CHANGE_EVENT } from '@/lib/joinedForums';
 import { FORUM_CATEGORIES, type ForumCategorySlug } from '@/lib/forum';
 import {
   TECHNICAL_FIELD_SLUGS,
@@ -60,6 +61,12 @@ interface NodeTarget {
   subsectionSlug: string | null;
 }
 
+interface TreeData {
+  nodes: NodeDef[];
+  targets: Record<number, NodeTarget>;
+  positions: [number, number, number][];
+}
+
 function hash(n: number): number {
   const x = Math.sin(n * 127.1 + 311.7) * 43758.5453;
   return x - Math.floor(x);
@@ -109,7 +116,9 @@ function hubParentAndDepth(
   return { parentId, depth: maxD + 1 };
 }
 
-function buildSkillForest2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<number, NodeTarget> } {
+function buildSkillForest2D(
+  joinedSectionKeys: Set<string>,
+): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<number, NodeTarget> } {
   const nodes: Omit<NodeDef, 'z'>[] = [];
   const targets: Record<number, NodeTarget> = {};
   const childrenByParent = new Map<number, number[]>();
@@ -164,6 +173,7 @@ function buildSkillForest2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<nu
 
   for (let pi = 0; pi < LIFE_SKILL_PILLARS.length; pi++) {
     const pillar = LIFE_SKILL_PILLARS[pi];
+    if (!joinedSectionKeys.has(getForumSectionKey('life-advice', pillar.slug))) continue;
     const pillarFamily = pi;
     const pillarHubId = addNode(
       rootId,
@@ -174,12 +184,12 @@ function buildSkillForest2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<nu
       toneColor(SKILL_BASE_COLORS[pillarFamily % SKILL_BASE_COLORS.length], 0),
       SIZES[1],
       {
-        href: '/forum/life-advice',
+        href: `/forum/life-advice/${pillar.slug}`,
         skill: 'Life advice',
         nodeLabel: pillar.label,
         detail: pillar.description,
         categorySlug: 'life-advice',
-        subsectionSlug: null,
+        subsectionSlug: pillar.slug,
       },
     );
 
@@ -199,7 +209,7 @@ function buildSkillForest2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<nu
         toneColor(SKILL_BASE_COLORS[pillarFamily % SKILL_BASE_COLORS.length], Math.min(d, 5)),
         SIZES[Math.min(d, SIZES.length - 1)],
         {
-          href: `/forum/life-advice/${n.slug}`,
+          href: `/forum/life-advice/${pillar.slug}`,
           skill: pillar.label,
           nodeLabel: n.label,
           detail: n.description,
@@ -215,6 +225,7 @@ function buildSkillForest2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<nu
   const techFamilyOffset = LIFE_SKILL_PILLARS.length;
   for (let fi = 0; fi < TECHNICAL_FIELD_SLUGS.length; fi++) {
     const field = TECHNICAL_FIELD_SLUGS[fi];
+    if (!joinedSectionKeys.has(getForumSectionKey('technical-advice', field))) continue;
     const fieldSub = techCat.subsections.find((s) => s.slug === field)!;
     const fieldFamily = techFamilyOffset + fi;
     const fieldNodeId = addNode(
@@ -251,7 +262,7 @@ function buildSkillForest2D(): { nodes: Omit<NodeDef, 'z'>[]; targets: Record<nu
         toneColor(SKILL_BASE_COLORS[fieldFamily % SKILL_BASE_COLORS.length], Math.min(d, 5)),
         SIZES[Math.min(d, SIZES.length - 1)],
         {
-          href: `/forum/technical-advice/${field}/${n.slug}`,
+          href: `/forum/technical-advice/${field}`,
           skill: fieldSub.label,
           nodeLabel: n.label,
           detail: n.description,
@@ -359,19 +370,16 @@ function liftZ(nodes: Omit<NodeDef, 'z'>[]): number[] {
   return z;
 }
 
-function buildNodes(): { nodes: NodeDef[]; targets: Record<number, NodeTarget> } {
-  const { nodes: base, targets } = buildSkillForest2D();
+function buildNodes(joinedSectionKeys: Set<string>): TreeData {
+  const { nodes: base, targets } = buildSkillForest2D(joinedSectionKeys);
   const zs = liftZ(base);
+  const nodes = base.map((n, i) => ({ ...n, z: zs[i] }));
   return {
-    nodes: base.map((n, i) => ({ ...n, z: zs[i] })),
+    nodes,
     targets,
+    positions: nodes.map((n) => [n.x, n.y, n.z]),
   };
 }
-
-const TREE_DATA = buildNodes();
-const NODES = TREE_DATA.nodes;
-const NODE_TARGETS = TREE_DATA.targets;
-const POS: [number, number, number][] = NODES.map((n) => [n.x, n.y, n.z]);
 // Branch radii taper strongly with depth so deeper branches look thin/delicate
 const BR_R = [0.102, 0.066, 0.045, 0.032, 0.021, 0.014, 0.010];
 // Branch colors lighten with depth (darker near root, warmer at tips)
@@ -482,12 +490,12 @@ function makeBarkTextures(): BarkTextureSet | null {
 
 const TREE_PAD = 0.85;
 
-function treeAxisBounds() {
+function treeAxisBounds(nodes: NodeDef[]) {
   let minX = Infinity;
   let maxX = -Infinity;
   let minY = Infinity;
   let maxY = -Infinity;
-  for (const n of NODES) {
+  for (const n of nodes) {
     minX = Math.min(minX, n.x - n.size);
     maxX = Math.max(maxX, n.x + n.size);
     minY = Math.min(minY, n.y - n.size);
@@ -495,8 +503,6 @@ function treeAxisBounds() {
   }
   return { minX, maxX, minY, maxY };
 }
-
-const SKILL_TREE_BOUNDS = treeAxisBounds();
 
 /**
  * Ground / trunk-base line in world Y. Trunk mesh: center y=-0.4, height 0.8 → bottom at -0.8.
@@ -512,12 +518,13 @@ const FLOOR_LOCAL_Y = -0.8;
 function orthoFrustumForViewport(
   vw: number,
   vh: number,
+  nodes: NodeDef[],
   pad = TREE_PAD,
 ): { left: number; right: number; top: number; bottom: number } {
   if (vw <= 0 || vh <= 0) {
     return { left: -1, right: 1, top: 1, bottom: -1 };
   }
-  const { minX, maxX, maxY } = treeAxisBounds();
+  const { minX, maxX, maxY } = treeAxisBounds(nodes);
   const bw = maxX - minX + pad * 2;
   // Include ground padding below the floor so the trunk base is visible above the ground strip
   const groundPad = pad * 1.1;
@@ -600,9 +607,9 @@ function forestTreeGroupY(scale: number): number {
  * Structured forest: left + right stands + back row, all planted on the same floor;
  * depth rows use more negative Z for farther trees (smaller scale). Center kept clear for the skill tree.
  */
-function buildForestBackgroundTrees(): BgTreeDef[] {
+function buildForestBackgroundTrees(bounds: { minX: number; maxX: number }): BgTreeDef[] {
   const out: BgTreeDef[] = [];
-  const { minX, maxX } = SKILL_TREE_BOUNDS;
+  const { minX, maxX } = bounds;
   const cx = (minX + maxX) / 2;
   const halfW = (maxX - minX) / 2 + 0.4;
 
@@ -654,8 +661,6 @@ function buildForestBackgroundTrees(): BgTreeDef[] {
 
   return out;
 }
-
-const BG_TREES = buildForestBackgroundTrees();
 
 const BG_FOLIAGE: { x: number; y: number; z: number; r: number; ci: number }[] = [
   { x: 0,     y: 0.55, z: 0,     r: 0.22, ci: 0 },
@@ -752,11 +757,11 @@ function SceneBackdrop() {
   );
 }
 
-function BackgroundForest() {
+function BackgroundForest({ bgTrees }: { bgTrees: BgTreeDef[] }) {
   return (
     <>
       <SceneBackdrop />
-      {BG_TREES.map((t) => (
+      {bgTrees.map((t) => (
         <BackgroundTree key={t.id} tree={t} />
       ))}
     </>
@@ -891,9 +896,9 @@ const SkillNode = memo(function SkillNode({
   const shape = useMemo(() => nodeShapeIndex(node), [node]);
   const pulse = useMemo(() => 0.8 + hash(node.id * 17.3) * 1.2, [node.id]);
   const tilt = useMemo(() => (hash(node.id * 41.7) - 0.5) * 0.45, [node.id]);
-  const initRotX = useMemo(() => Math.random() * Math.PI * 2, [node.id]);
-  const initRotY = useMemo(() => Math.random() * Math.PI * 2, [node.id]);
-  const initRotZ = useMemo(() => Math.random() * Math.PI * 2, [node.id]);
+  const initRotX = useMemo(() => hash(node.id * 53.1) * Math.PI * 2, [node.id]);
+  const initRotY = useMemo(() => hash(node.id * 97.4) * Math.PI * 2, [node.id]);
+  const initRotZ = useMemo(() => hash(node.id * 149.2) * Math.PI * 2, [node.id]);
 
   const renderPolyGeometry = useCallback(
     (radius: number) => {
@@ -1033,25 +1038,29 @@ function Fireflies() {
 }
 
 function TreeMeshes({
+  treeData,
   hovered,
   onHover,
   onNodeClick,
 }: {
+  treeData: TreeData;
   hovered: number | null;
   onHover: (id: number | null) => void;
   onNodeClick: (node: NodeDef, e: ThreeEvent<MouseEvent>) => void;
 }) {
+  const { nodes, positions } = treeData;
+
   return (
     <>
       <Trunk />
-      {NODES.filter((n) => n.parentId !== null).map((n) => (
-        <BranchTube key={n.id} parent={NODES[n.parentId!]} child={n} />
+      {nodes.filter((n) => n.parentId !== null).map((n) => (
+        <BranchTube key={n.id} parent={nodes[n.parentId!]} child={n} />
       ))}
-      {NODES.map((node, i) => (
+      {nodes.map((node) => (
         <SkillNode
           key={node.id}
           node={node}
-          pos={POS[i]}
+          pos={positions[node.id]}
           isHovered={hovered === node.id}
           onHover={onHover}
           onClick={onNodeClick}
@@ -1062,6 +1071,8 @@ function TreeMeshes({
 }
 
 interface OrthoSkillSceneProps {
+  treeData: TreeData;
+  bgTrees: BgTreeDef[];
   viewPixels?: { w: number; h: number };
   viewState?: ViewState;
   setViewState?: Dispatch<SetStateAction<ViewState>>;
@@ -1083,6 +1094,8 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
     enableTilt = true,
     onNodeHover,
     onNodeActivate,
+    treeData,
+    bgTrees,
   } = props;
   const { camera, gl, size } = useThree();
   const [internalVs, setInternalVs] = useState<ViewState>(DEFAULT_VIEW);
@@ -1095,9 +1108,9 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
 
   const worldFrustum = useMemo(() => {
     if (vw <= 0 || vh <= 0) return null;
-    const base = orthoFrustumForViewport(vw, vh);
+    const base = orthoFrustumForViewport(vw, vh, treeData.nodes);
     return applyViewState(base, vs);
-  }, [vw, vh, vs.panX, vs.panY, vs.zoom]);
+  }, [vw, vh, vs, treeData.nodes]);
 
   const vsRef = useRef(vs);
   vsRef.current = vs;
@@ -1124,6 +1137,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       setHovered(id);
       onNodeHover?.(id);
       if (ctrl.current.panDragging) return;
+      // eslint-disable-next-line react-hooks/immutability
       gl.domElement.style.cursor = id !== null ? 'pointer' : 'grab';
     },
     [gl, onNodeHover],
@@ -1134,6 +1148,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
     const { left, right, top, bottom, cx, cy } = worldFrustumToCameraLocal(worldFrustum);
     const cam = camera as THREE.OrthographicCamera;
     if (!cam.isOrthographicCamera) return;
+    /* eslint-disable react-hooks/immutability */
     cam.left = left;
     cam.right = right;
     cam.top = top;
@@ -1150,6 +1165,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
     const tiltX = enableTilt ? c.smX * TILT_X * parallaxScale : 0;
     const tiltY = enableTilt ? c.smY * TILT_Y * parallaxScale : 0;
     cam.lookAt(cx + tiltX, cy + tiltY, 0);
+    /* eslint-enable react-hooks/immutability */
 
     // Animate towards click-to-zoom target
     const tgt = targetVsRef.current;
@@ -1175,6 +1191,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
 
   useEffect(() => {
     const el = gl.domElement;
+    // eslint-disable-next-line react-hooks/immutability
     el.style.cursor = 'grab';
 
     const onWheel = (e: WheelEvent) => {
@@ -1186,7 +1203,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       const my = e.clientY - rect.top;   // mouse pixels from canvas top
 
       setVs((prev) => {
-        const base = orthoFrustumForViewport(vw, vh);
+        const base = orthoFrustumForViewport(vw, vh, treeData.nodes);
         const cur = applyViewState(base, prev);
         const baseCx = (base.left + base.right) / 2;
         const baseCy = (base.bottom + base.top) / 2;
@@ -1249,7 +1266,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
         targetVsRef.current = null;
         // Scale pan delta by current zoom so a drag feels consistent at any zoom level
         setVs((prev) => {
-          const base = orthoFrustumForViewport(vw, vh);
+          const base = orthoFrustumForViewport(vw, vh, treeData.nodes);
           const ww2 = (base.right - base.left) * prev.zoom;
           const wh2 = (base.top - base.bottom) * prev.zoom;
           return {
@@ -1289,7 +1306,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       el.removeEventListener('dblclick', resetView);
       window.removeEventListener('keydown', onKey);
     };
-  }, [gl, vw, vh, setVs]);
+  }, [gl, vw, vh, setVs, treeData.nodes]);
 
   const onNodeClick = useCallback(
     (node: NodeDef, e: ThreeEvent<MouseEvent>) => {
@@ -1300,13 +1317,13 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       onNodeActivate?.(node.id);
       if (onNodeActivate) return;
       if (vw <= 0 || vh <= 0) return;
-      const b = orthoFrustumForViewport(vw, vh);
+      const b = orthoFrustumForViewport(vw, vh, treeData.nodes);
       const baseCx = (b.left + b.right) / 2;
       const baseCy = (b.bottom + b.top) / 2;
       const targetZoom = Math.min(vsRef.current.zoom, NODE_CLICK_ZOOM);
       targetVsRef.current = { panX: node.x - baseCx, panY: node.y - baseCy, zoom: targetZoom };
     },
-    [vw, vh, onNodeActivate],
+    [vw, vh, onNodeActivate, treeData.nodes],
   );
 
   return (
@@ -1333,8 +1350,13 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       <pointLight position={[-14, 7, 4]} intensity={0.42} color="#e7c6a6" distance={38} decay={2} />
       <pointLight position={[14, 7, 4]} intensity={0.42} color="#e7c6a6" distance={38} decay={2} />
 
-      <BackgroundForest />
-      <TreeMeshes hovered={hovered} onHover={handleHover} onNodeClick={onNodeClick} />
+      <BackgroundForest bgTrees={bgTrees} />
+      <TreeMeshes
+        treeData={treeData}
+        hovered={hovered}
+        onHover={handleHover}
+        onNodeClick={onNodeClick}
+      />
       <Fireflies />
 
       <EffectComposer>
@@ -1352,13 +1374,38 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
   );
 }
 
-export default function SkillTreeV3() {
+export default function SkillTree() {
   const router = useRouter();
   const [activeNodeId, setActiveNodeId] = useState<number>(0);
+  const [joinedForums, setJoinedForums] = useState<Set<string>>(() => getJoinedForums());
 
-  const activeTarget = NODE_TARGETS[activeNodeId] ?? NODE_TARGETS[0];
-  const activeNode = NODES[activeNodeId] ?? NODES[0];
+  useEffect(() => {
+    function onJoinedChange() {
+      setJoinedForums(getJoinedForums());
+      setActiveNodeId(0);
+    }
 
+    window.addEventListener(JOINED_FORUMS_CHANGE_EVENT, onJoinedChange);
+    return () => window.removeEventListener(JOINED_FORUMS_CHANGE_EVENT, onJoinedChange);
+  }, []);
+
+  const treeData = useMemo(() => buildNodes(joinedForums), [joinedForums]);
+  const bgTrees = useMemo(() => {
+    const bounds = treeAxisBounds(treeData.nodes);
+    return buildForestBackgroundTrees({ minX: bounds.minX, maxX: bounds.maxX });
+  }, [treeData.nodes]);
+  const firstVisibleNodeId = useMemo(() => {
+    for (const node of treeData.nodes) {
+      if (node.id !== 0) {
+        return node.id;
+      }
+    }
+    return 0;
+  }, [treeData.nodes]);
+  const activeVisibleNodeId = treeData.nodes.some((node) => node.id === activeNodeId)
+    ? activeNodeId
+    : firstVisibleNodeId;
+  const activeTarget = treeData.targets[activeVisibleNodeId] ?? treeData.targets[0];
   const handleNodeHover = useCallback((nodeId: number | null) => {
     if (nodeId === null) return;
     setActiveNodeId(nodeId);
@@ -1366,28 +1413,40 @@ export default function SkillTreeV3() {
 
   const handleNodeActivate = useCallback(
     (nodeId: number) => {
-      const target = NODE_TARGETS[nodeId];
+      const target = treeData.targets[nodeId];
       if (!target) return;
       setActiveNodeId(nodeId);
       router.push(target.href);
     },
-    [router],
+    [router, treeData.targets],
   );
 
   return (
-    <div style={{ position: 'fixed', inset: 0, overflow: 'hidden', background: BACKGROUND_COLOR }}>
-      <Canvas gl={{ antialias: true }} style={{ width: '100%', height: '100%', background: BACKGROUND_COLOR }}>
-        <OrthoSkillScene onNodeHover={handleNodeHover} onNodeActivate={handleNodeActivate} />
+    <div
+      style={{
+        position: 'relative',
+        minHeight: '100dvh',
+        width: '100%',
+        overflow: 'hidden',
+        background: BACKGROUND_COLOR,
+      }}
+    >
+      <Canvas gl={{ antialias: true }} style={{ width: '100%', height: '100dvh', background: BACKGROUND_COLOR }}>
+        <OrthoSkillScene
+          treeData={treeData}
+          bgTrees={bgTrees}
+          onNodeHover={handleNodeHover}
+          onNodeActivate={handleNodeActivate}
+        />
       </Canvas>
 
       <aside
           style={{
             position: 'absolute',
-            left: '92%',
-            bottom:"-3%",
-            transform: 'translate(-50%, -50%)',
+            right: 12,
+            bottom: 12,
             zIndex: 24,
-            width: 'min(360px, calc(100vw - 24px))',
+            width: 'min(360px, calc(100% - 24px))',
             background: 'rgba(15, 23, 42, 0.84)',
             border: '1px solid rgba(148, 163, 184, 0.52)',
             borderRadius: 10,
@@ -1405,6 +1464,31 @@ export default function SkillTreeV3() {
           </h3>
           <p style={{ margin: '8px 0 0', fontSize: 12, color: '#cbd5e1' }}>{activeTarget.detail}</p>
         </aside>
+      {treeData.nodes.length === 1 && (
+        <aside
+          style={{
+            position: 'absolute',
+            left: 12,
+            top: 12,
+            zIndex: 24,
+            maxWidth: 320,
+            background: 'rgba(15, 23, 42, 0.84)',
+            border: '1px solid rgba(148, 163, 184, 0.52)',
+            borderRadius: 10,
+            boxShadow: '0 12px 28px rgba(2, 6, 23, 0.35)',
+            color: '#e2e8f0',
+            backdropFilter: 'blur(7px)',
+            padding: '12px 12px 11px',
+          }}
+        >
+          <h2 style={{ margin: 0, fontSize: 15, lineHeight: 1.2, color: '#f8fafc' }}>
+            Join a section to grow your tree
+          </h2>
+          <p style={{ margin: '8px 0 0', fontSize: 12, color: '#cbd5e1' }}>
+            Use the + button in the forum sidebar to add sections back into the tree.
+          </p>
+        </aside>
+      )}
     </div>
   );
 }

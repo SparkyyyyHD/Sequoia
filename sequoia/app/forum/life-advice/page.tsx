@@ -1,7 +1,6 @@
 import Link from "next/link";
 import { getForumCategory } from "@/lib/forum";
 import { LIFE_SKILL_PILLARS } from "@/lib/skillTrees";
-import FavoriteButton from "@/components/FavoriteButton";
 import JoinForumButton from "@/components/JoinForumButton";
 
 const LIFE_ADVICE = getForumCategory("life-advice");
@@ -24,38 +23,30 @@ export default function ForumLifeAdvicePage() {
       <div className="mt-6 space-y-8">
         {LIFE_SKILL_PILLARS.map((pillar) => (
           <section key={pillar.slug} id={pillar.slug} className="scroll-mt-6">
-            <h2 className="text-sm font-semibold text-[var(--forum-text-primary)]">
-              {pillar.label}
-            </h2>
-            <p className="mt-0.5 text-xs text-[var(--forum-text-secondary)]">
-              {pillar.description}
-            </p>
-            <div className="mt-3 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-              {pillar.nodes.map((node) => (
-                <div
-                  key={node.slug}
-                  className="forum-subsection-card relative p-3"
-                >
-                  <div className="flex items-start justify-between gap-1">
+            <div className="forum-subsection-card relative p-4">
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold text-[var(--forum-text-primary)]">
                     <Link
-                      href={`/forum/life-advice/${node.slug}`}
-                      className="forum-stretched-link text-sm font-medium text-[var(--forum-text-primary)]"
+                      href={`/forum/life-advice/${pillar.slug}`}
+                      className="forum-stretched-link"
                     >
-                      {node.label}
+                      {pillar.label}
                     </Link>
-                    <div className="flex items-center gap-1">
-                      <JoinForumButton
-                        category="life-advice"
-                        subsection={node.slug}
-                      />
-                      <FavoriteButton category="life-advice" subsection={node.slug} />
-                    </div>
-                  </div>
+                  </h2>
                   <p className="mt-0.5 text-xs text-[var(--forum-text-secondary)]">
-                    {node.description}
+                    {pillar.description}
                   </p>
                 </div>
-              ))}
+                <div className="flex items-center gap-1">
+                  <JoinForumButton category="life-advice" subsection={pillar.slug} />
+                </div>
+              </div>
+              <p className="mt-3 text-xs text-[var(--forum-text-muted)]">
+                {pillar.nodes.length} skills in this section:{" "}
+                {pillar.nodes.slice(0, 3).map((node) => node.label).join(", ")}
+                {pillar.nodes.length > 3 ? ", ..." : ""}
+              </p>
             </div>
           </section>
         ))}
