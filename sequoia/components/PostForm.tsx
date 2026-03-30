@@ -391,9 +391,30 @@ export default function PostForm({ category, subcategory, topicOptions }: PostFo
         </label>
       </div>
       {attachments.length > 0 && (
-        <p className="mt-1 text-xs text-[var(--forum-text-muted)]">
-          {attachments.length} file attachment{attachments.length === 1 ? "" : "s"} selected.
-        </p>
+        <div className="mt-3 rounded-md border border-[var(--forum-border)] bg-[var(--forum-bg-secondary)] p-3">
+          <p className="mb-2 text-sm font-medium text-[var(--forum-text-secondary)]">
+            Attached files ({attachments.length})
+          </p>
+          <ul className="space-y-2">
+            {attachments.map((file, idx) => (
+              <li
+                key={`${file.name}-${idx}`}
+                className="flex items-center justify-between rounded border border-[var(--forum-border)] bg-[var(--forum-bg)] px-3 py-2"
+              >
+                <span className="truncate pr-3 text-sm text-[var(--forum-text-primary)]">
+                  {file.name}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => setAttachments((prev) => prev.filter((_, i) => i !== idx))}
+                  className="cursor-pointer rounded border border-[var(--forum-border)] px-2 py-1 text-xs font-medium text-[var(--forum-text-secondary)] hover:bg-[var(--forum-hover)]"
+                >
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
       )}
       {error && <p className="mt-2 text-sm text-[var(--forum-error)]">{error}</p>}
       <div className="mt-3 flex justify-end">
