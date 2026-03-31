@@ -15,8 +15,6 @@ import {
   topoSortSkillTree,
   buildTechnicalSkillSubsection,
   type TechnicalFieldSlug,
-  getLifeSectionSlug,
-  parseTechnicalSkillSubsection,
 } from '@/lib/skillTrees';
 import { supabase } from '@/lib/supabase';
 import { useRef, useState, useCallback, useEffect, useMemo, memo, type Dispatch, type SetStateAction } from 'react';
@@ -49,6 +47,7 @@ interface NodeDef {
   depth: number;
   family: number;
   sectionKey: string | null;
+  forumKey: string | null;
   x: number;
   y: number;
   z: number;
@@ -126,17 +125,9 @@ function voteTierForHelpful(helpfulVotes: number): VoteTier {
   return 'legendary';
 }
 
-function getSectionKeyFromPost(category?: string | null, subcategory?: string | null): string | null {
+function getForumKey(category?: string | null, subcategory?: string | null): string | null {
   if (!category || !subcategory) return null;
-  if (category === 'life-advice') {
-    const sectionSlug = getLifeSectionSlug(subcategory) ?? subcategory;
-    return getForumSectionKey('life-advice', sectionSlug);
-  }
-  if (category === 'technical-advice') {
-    const sectionSlug = parseTechnicalSkillSubsection(subcategory)?.fieldSlug ?? subcategory;
-    return getForumSectionKey('technical-advice', sectionSlug);
-  }
-  return null;
+  return `${category}::${subcategory}`;
 }
 
 function hash(n: number): number {
@@ -199,6 +190,7 @@ function buildSkillForest2D(
     parentId: number | null,
     family: number,
     sectionKey: string | null,
+    forumKey: string | null,
     x: number,
     y: number,
     depth: number,
@@ -213,6 +205,7 @@ function buildSkillForest2D(
       depth,
       family,
       sectionKey,
+      forumKey,
       x,
       y,
       color,
@@ -230,6 +223,7 @@ function buildSkillForest2D(
   const rootId = addNode(
     null,
     -1,
+    null,
     null,
     0,
     0,
@@ -251,10 +245,12 @@ function buildSkillForest2D(
     if (!joinedSectionKeys.has(getForumSectionKey('life-advice', pillar.slug))) continue;
     const pillarFamily = pi;
     const sectionKey = getForumSectionKey('life-advice', pillar.slug);
+    const pillarForumKey = getForumKey('life-advice', pillar.slug);
     const pillarHubId = addNode(
       rootId,
       pillarFamily,
       sectionKey,
+      pillarForumKey,
       0,
       Y_STEP,
       1,
@@ -281,6 +277,7 @@ function buildSkillForest2D(
         parentId,
         pillarFamily,
         sectionKey,
+        getForumKey('life-advice', n.slug),
         0,
         0,
         0,
@@ -307,10 +304,12 @@ function buildSkillForest2D(
     const fieldSub = techCat.subsections.find((s) => s.slug === field)!;
     const fieldFamily = techFamilyOffset + fi;
     const sectionKey = getForumSectionKey('technical-advice', field);
+    const fieldForumKey = getForumKey('technical-advice', field);
     const fieldNodeId = addNode(
       rootId,
       fieldFamily,
       sectionKey,
+      fieldForumKey,
       0,
       Y_STEP,
       1,
@@ -337,6 +336,7 @@ function buildSkillForest2D(
         parentId,
         fieldFamily,
         sectionKey,
+        getForumKey('technical-advice', buildTechnicalSkillSubsection(field, n.slug)),
         0,
         0,
         0,
@@ -1038,11 +1038,11 @@ function Trunk() {
 const BranchTube = memo(function BranchTube({
   parent,
   child,
-  sectionHelpfulVotes,
+  forumHelpfulVotes,
 }: {
   parent: NodeDef;
   child: NodeDef;
-  sectionHelpfulVotes: Record<string, number>;
+  forumHelpfulVotes: Record<string, number>;
 }) {
   const branch = useMemo(() => {
     const pz = parent.z - 0.15;
@@ -1077,7 +1077,7 @@ const BranchTube = memo(function BranchTube({
 
   const bark = useMemo(() => makeBarkTextures(), []);
 
-  const helpfulVotes = child.sectionKey ? (sectionHelpfulVotes[child.sectionKey] ?? 0) : 0;
+  const helpfulVotes = child.forumKey ? (forumHelpfulVotes[child.forumKey] ?? 0) : 0;
   const tier = voteTierForHelpful(helpfulVotes);
   const tierStyle = VOTE_TIER_STYLES[tier];
   const di = Math.min(parent.depth, BR_C.length - 1);
@@ -1121,7 +1121,7 @@ const BranchTube = memo(function BranchTube({
 interface SkillNodeProps {
   node: NodeDef;
   pos: [number, number, number];
-  sectionHelpfulVotes: Record<string, number>;
+  forumHelpfulVotes: Record<string, number>;
   isHovered: boolean;
   onHover: (id: number | null) => void;
   onClick: (node: NodeDef, e: ThreeEvent<MouseEvent>) => void;
@@ -1134,7 +1134,7 @@ function nodeShapeIndex(node: NodeDef): number {
 const SkillNode = memo(function SkillNode({
   node,
   pos,
-  sectionHelpfulVotes,
+  forumHelpfulVotes,
   isHovered,
   onHover,
   onClick,
@@ -1144,7 +1144,7 @@ const SkillNode = memo(function SkillNode({
   const glowOuterRef = useRef<THREE.MeshBasicMaterial>(null!);
   const glowInnerRef = useRef<THREE.MeshBasicMaterial>(null!);
 
-  const helpfulVotes = node.sectionKey ? (sectionHelpfulVotes[node.sectionKey] ?? 0) : 0;
+  const helpfulVotes = node.forumKey ? (forumHelpfulVotes[node.forumKey] ?? 0) : 0;
   const tier = voteTierForHelpful(helpfulVotes);
   const tierStyle = VOTE_TIER_STYLES[tier];
   const baseColor = useMemo(() => {
@@ -1301,13 +1301,13 @@ function Fireflies() {
 
 function TreeMeshes({
   treeData,
-  sectionHelpfulVotes,
+  forumHelpfulVotes,
   hovered,
   onHover,
   onNodeClick,
 }: {
   treeData: TreeData;
-  sectionHelpfulVotes: Record<string, number>;
+  forumHelpfulVotes: Record<string, number>;
   hovered: number | null;
   onHover: (id: number | null) => void;
   onNodeClick: (node: NodeDef, e: ThreeEvent<MouseEvent>) => void;
@@ -1322,7 +1322,7 @@ function TreeMeshes({
           key={n.id}
           parent={nodes[n.parentId!]}
           child={n}
-          sectionHelpfulVotes={sectionHelpfulVotes}
+          forumHelpfulVotes={forumHelpfulVotes}
         />
       ))}
       {nodes.map((node) => (
@@ -1330,7 +1330,7 @@ function TreeMeshes({
           key={node.id}
           node={node}
           pos={positions[node.id]}
-          sectionHelpfulVotes={sectionHelpfulVotes}
+          forumHelpfulVotes={forumHelpfulVotes}
           isHovered={hovered === node.id}
           onHover={onHover}
           onClick={onNodeClick}
@@ -1343,7 +1343,7 @@ function TreeMeshes({
 interface OrthoSkillSceneProps {
   treeData: TreeData;
   bgTrees: BgTreeDef[];
-  sectionHelpfulVotes: Record<string, number>;
+  forumHelpfulVotes: Record<string, number>;
   viewPixels?: { w: number; h: number };
   viewState?: ViewState;
   setViewState?: Dispatch<SetStateAction<ViewState>>;
@@ -1357,7 +1357,7 @@ interface OrthoSkillSceneProps {
  * Orthographic view along -Z: screen (x, y) matches world (x, y) exactly for the chosen frustum.
  * Same mapping as `Layout2DOverlay` when both use the same world frustum + pixel dimensions.
  */
-function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
+function OrthoSkillScene(props: OrthoSkillSceneProps) {
   const {
     viewPixels,
     viewState: vsProp,
@@ -1367,7 +1367,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
     onNodeActivate,
     treeData,
     bgTrees,
-    sectionHelpfulVotes,
+    forumHelpfulVotes,
   } = props;
   const { camera, gl, size } = useThree();
   const [internalVs, setInternalVs] = useState<ViewState>(DEFAULT_VIEW);
@@ -1631,7 +1631,7 @@ useEffect(() => {
       <BackgroundForest bgTrees={bgTrees} />
       <TreeMeshes
         treeData={treeData}
-        sectionHelpfulVotes={sectionHelpfulVotes}
+        forumHelpfulVotes={forumHelpfulVotes}
         hovered={hovered}
         onHover={handleHover}
         onNodeClick={onNodeClick}
@@ -1658,7 +1658,7 @@ export default function SkillTree() {
   const router = useRouter();
   const [activeNodeId, setActiveNodeId] = useState<number>(0);
   const [joinedForums, setJoinedForums] = useState<Set<string>>(() => getJoinedForums());
-  const [sectionHelpfulVotes, setSectionHelpfulVotes] = useState<Record<string, number>>({});
+  const [forumHelpfulVotes, setForumHelpfulVotes] = useState<Record<string, number>>({});
 
   useEffect(() => {
     function onJoinedChange() {
@@ -1675,7 +1675,7 @@ export default function SkillTree() {
 
     async function loadVotesBySection() {
       if (!displayName) {
-        setSectionHelpfulVotes({});
+        setForumHelpfulVotes({});
         return;
       }
 
@@ -1686,17 +1686,17 @@ export default function SkillTree() {
 
       if (cancelled) return;
       if (error || !data) {
-        setSectionHelpfulVotes({});
+        setForumHelpfulVotes({});
         return;
       }
 
       const next: Record<string, number> = {};
       for (const row of data as { category?: string | null; subcategory?: string | null; helpful_count?: number | null }[]) {
-        const sectionKey = getSectionKeyFromPost(row.category, row.subcategory);
-        if (!sectionKey) continue;
-        next[sectionKey] = (next[sectionKey] ?? 0) + (row.helpful_count ?? 0);
+        const forumKey = getForumKey(row.category, row.subcategory);
+        if (!forumKey) continue;
+        next[forumKey] = (next[forumKey] ?? 0) + (row.helpful_count ?? 0);
       }
-      setSectionHelpfulVotes(next);
+      setForumHelpfulVotes(next);
     }
 
     loadVotesBySection();
@@ -1752,7 +1752,7 @@ export default function SkillTree() {
         <OrthoSkillScene
           treeData={treeData}
           bgTrees={bgTrees}
-          sectionHelpfulVotes={sectionHelpfulVotes}
+          forumHelpfulVotes={forumHelpfulVotes}
           onNodeHover={handleNodeHover}
           onNodeActivate={handleNodeActivate}
         />
