@@ -54,7 +54,7 @@ function serializeEditor(el: HTMLDivElement): string {
 
 export default function PostForm({ category, subcategory, topicOptions }: PostFormProps) {
   const router = useRouter();
-  const { user, displayName, loading, isGuest } = useAuth();
+  const { user, displayName, avatarUrl, loading, isGuest } = useAuth();
   const editorRef = useRef<HTMLDivElement>(null);
   const [editorEmpty, setEditorEmpty] = useState(true);
   const [content, setContent] = useState("");
@@ -272,7 +272,7 @@ export default function PostForm({ category, subcategory, topicOptions }: PostFo
   return (
     <form onSubmit={handleSubmit} className="forum-post-composer forum-card mt-4 p-4 sm:p-5">
       <div className="mb-3 flex items-center gap-2">
-        <AuthorAvatar name={displayName} size="md" />
+        <AuthorAvatar name={displayName} src={avatarUrl} size="md" />
         <p className="text-sm font-semibold text-[var(--forum-text-primary)]">{displayName}</p>
       </div>
       {topicOptions && topicOptions.length > 1 && (

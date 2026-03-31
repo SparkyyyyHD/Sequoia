@@ -1,3 +1,4 @@
+import { memo } from "react";
 import ReactMarkdown from "react-markdown";
 import rehypeRaw from "rehype-raw";
 import {
@@ -11,7 +12,10 @@ interface MarkdownContentProps {
   className?: string;
 }
 
-export default function MarkdownContent({ content, className }: MarkdownContentProps) {
+const MarkdownContent = memo(function MarkdownContent({
+  content,
+  className,
+}: MarkdownContentProps) {
   return (
     <div className={className}>
       <ReactMarkdown
@@ -66,4 +70,6 @@ export default function MarkdownContent({ content, className }: MarkdownContentP
       </ReactMarkdown>
     </div>
   );
-}
+});
+
+export default MarkdownContent;
