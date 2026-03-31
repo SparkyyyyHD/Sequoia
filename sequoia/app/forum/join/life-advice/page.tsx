@@ -17,7 +17,7 @@ export default async function JoinLifeAdvicePage() {
         </h1>
         <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
           Each section covers a full skill arc. Add it to your sidebar, home feed, and skill tree. Stats reflect
-          public posts in this app (unique voices = distinct display names).
+          public posts in this app.
         </p>
         <p className="mt-2 text-xs text-[var(--forum-text-muted)]">
           <Link href="/forum/join/technical-advice" className="forum-link">

@@ -53,9 +53,6 @@ export default async function ForumLifeSkillPage({
             <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
               {sectionMeta.description}
             </p>
-            <p className="mt-2 text-xs text-[var(--forum-text-muted)]">
-              Topics are tags for posts—everything lives in this section. Use search and filters below.
-            </p>
           </div>
           <div className="flex items-center gap-1">
             <JoinForumButton category="life-advice" subsection={sectionMeta.slug} />
