@@ -1,7 +1,6 @@
 "use client";
 
 import { useState } from "react";
-import { useRouter } from "next/navigation";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateVoterKey } from "@/lib/voterKey";
 
@@ -20,9 +19,9 @@ export default function PostVoteBar({
   myVote,
   onMyVoteUpdate,
 }: PostVoteBarProps) {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [countDelta, setCountDelta] = useState({ helpful: 0, notHelpful: 0 });
 
   async function applyVote(next: 1 | -1) {
     setError(null);
@@ -31,28 +30,52 @@ export default function PostVoteBar({
       setError("Unable to save feedback in this browser.");
       return;
     }
+
+    const toggling = myVote === next;
+    const newVote = toggling ? null : next;
+    const prevVote: 1 | -1 | null = myVote ?? null;
+
+    const delta = { helpful: 0, notHelpful: 0 };
+    if (toggling) {
+      if (next === 1) delta.helpful = -1;
+      else delta.notHelpful = -1;
+    } else {
+      if (next === 1) {
+        delta.helpful = 1;
+        if (myVote === -1) delta.notHelpful = -1;
+      } else {
+        delta.notHelpful = 1;
+        if (myVote === 1) delta.helpful = -1;
+      }
+    }
+
+    setCountDelta((prev) => ({
+      helpful: prev.helpful + delta.helpful,
+      notHelpful: prev.notHelpful + delta.notHelpful,
+    }));
+    onMyVoteUpdate(postId, newVote as 1 | -1 | null);
+
     setPending(true);
     const { error: rpcError } = await supabase.rpc("set_post_vote", {
       p_post_id: postId,
       p_voter_key: voterKey,
-      p_vote: myVote === next ? null : next,
+      p_vote: newVote,
     });
     setPending(false);
+
     if (rpcError) {
+      setCountDelta((prev) => ({
+        helpful: prev.helpful - delta.helpful,
+        notHelpful: prev.notHelpful - delta.notHelpful,
+      }));
+      onMyVoteUpdate(postId, prevVote);
       setError(rpcError.message);
       return;
     }
-    const { data } = await supabase.rpc("get_my_votes_for_posts", {
-      p_voter_key: voterKey,
-      p_post_ids: [postId],
-    });
-    const row = (data as { post_id: string; vote: number }[] | null)?.[0];
-    onMyVoteUpdate(postId, row ? (row.vote as 1 | -1) : null);
-    router.refresh();
   }
 
-  const h = helpfulCount ?? 0;
-  const n = notHelpfulCount ?? 0;
+  const h = (helpfulCount ?? 0) + countDelta.helpful;
+  const n = (notHelpfulCount ?? 0) + countDelta.notHelpful;
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--forum-line-subtle)] pt-2">

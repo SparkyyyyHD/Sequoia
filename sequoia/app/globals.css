@@ -617,10 +617,12 @@ h1.forum-post-title {
   white-space: pre-line;
 }
 
-/* First block = thread title: bold + larger */
-/* Chrome/Edge wrap in <div> after first Enter; Firefox uses <p> */
-.forum-composer-editor > div:first-child,
-.forum-composer-editor > p:first-child {
+/* First line of the first block = thread title: bold + larger.
+   Using ::first-line so that even if Shift+Enter (or browser quirks) puts
+   multiple lines inside the same first block, only the first visual line
+   is styled as the title. */
+.forum-composer-editor > div:first-child::first-line,
+.forum-composer-editor > p:first-child::first-line {
   color: var(--forum-text-primary);
   font-size: 1.0625rem;
   font-weight: 700;
