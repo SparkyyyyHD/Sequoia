@@ -1,0 +1,9 @@
+/* Hide scrollbars for SkillTree page only */
+.skilltreeScrollHide {
+  overflow: hidden;
+  scrollbar-width: none;        /* Firefox */
+  -ms-overflow-style: none;     /* IE and Edge */
+}
+.skilltreeScrollHide::-webkit-scrollbar {
+  display: none;                /* Chrome, Safari, Opera */
+}

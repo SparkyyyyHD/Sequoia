@@ -1,9 +1,11 @@
 'use client';
 
 import { Canvas, useFrame, useThree, ThreeEvent } from '@react-three/fiber';
+import styles from './SkillTree.module.css';
 import { OrthographicCamera } from '@react-three/drei';
 import { Bloom, EffectComposer, Noise, Vignette } from '@react-three/postprocessing';
 import { useRouter } from 'next/navigation';
+import { useAuth } from '@/components/AuthProvider';
 import { getForumSectionKey, getJoinedForums, JOINED_FORUMS_CHANGE_EVENT } from '@/lib/joinedForums';
 import { FORUM_CATEGORIES, type ForumCategorySlug } from '@/lib/forum';
 import {
@@ -13,7 +15,10 @@ import {
   topoSortSkillTree,
   buildTechnicalSkillSubsection,
   type TechnicalFieldSlug,
+  getLifeSectionSlug,
+  parseTechnicalSkillSubsection,
 } from '@/lib/skillTrees';
+import { supabase } from '@/lib/supabase';
 import { useRef, useState, useCallback, useEffect, useMemo, memo, type Dispatch, type SetStateAction } from 'react';
 import * as THREE from 'three';
 
@@ -43,6 +48,7 @@ interface NodeDef {
   parentId: number | null;
   depth: number;
   family: number;
+  sectionKey: string | null;
   x: number;
   y: number;
   z: number;
@@ -65,6 +71,72 @@ interface TreeData {
   nodes: NodeDef[];
   targets: Record<number, NodeTarget>;
   positions: [number, number, number][];
+}
+
+type VoteTier = 'none' | 'little' | 'more' | 'legendary';
+
+interface VoteTierStyle {
+  color: string;
+  roughness: number;
+  metalness: number;
+  emissive: number;
+  glowOuter: number;
+  glowInner: number;
+}
+
+const VOTE_TIER_STYLES: Record<VoteTier, VoteTierStyle> = {
+  none: {
+    color: '#8c939f',
+    roughness: 0.95,
+    metalness: 0.02,
+    emissive: 0.0,
+    glowOuter: 0.03,
+    glowInner: 0.06,
+  },
+  little: {
+    color: '#46b971',
+    roughness: 0.7,
+    metalness: 0.16,
+    emissive: 0.1,
+    glowOuter: 0.12,
+    glowInner: 0.15,
+  },
+  more: {
+    color: '#8a63e8',
+    roughness: 0.46,
+    metalness: 0.38,
+    emissive: 0.2,
+    glowOuter: 0.15,
+    glowInner: 0.2,
+  },
+  legendary: {
+    color: '#ffb700',
+    roughness: 0.18,
+    metalness: 0.7,
+    emissive: 1.0,
+    glowOuter: 0.2,
+    glowInner: 0.3,
+  },
+};
+
+function voteTierForHelpful(helpfulVotes: number): VoteTier {
+  if (helpfulVotes <= 0) return 'none';
+  if (helpfulVotes < 10) return 'little';
+  if (helpfulVotes < 30) return 'more';
+  return 'legendary';
+}
+
+function getSectionKeyFromPost(category?: string | null, subcategory?: string | null): string | null {
+  if (!category || !subcategory) return null;
+  if (category === 'life-advice') {
+    const sectionSlug = getLifeSectionSlug(subcategory) ?? subcategory;
+    return getForumSectionKey('life-advice', sectionSlug);
+  }
+  if (category === 'technical-advice') {
+    const sectionSlug = parseTechnicalSkillSubsection(subcategory)?.fieldSlug ?? subcategory;
+    return getForumSectionKey('technical-advice', sectionSlug);
+  }
+  return null;
 }
 
 function hash(n: number): number {
@@ -126,6 +198,7 @@ function buildSkillForest2D(
   function addNode(
     parentId: number | null,
     family: number,
+    sectionKey: string | null,
     x: number,
     y: number,
     depth: number,
@@ -139,6 +212,7 @@ function buildSkillForest2D(
       parentId,
       depth,
       family,
+      sectionKey,
       x,
       y,
       color,
@@ -156,6 +230,7 @@ function buildSkillForest2D(
   const rootId = addNode(
     null,
     -1,
+    null,
     0,
     0,
     0,
@@ -175,9 +250,11 @@ function buildSkillForest2D(
     const pillar = LIFE_SKILL_PILLARS[pi];
     if (!joinedSectionKeys.has(getForumSectionKey('life-advice', pillar.slug))) continue;
     const pillarFamily = pi;
+    const sectionKey = getForumSectionKey('life-advice', pillar.slug);
     const pillarHubId = addNode(
       rootId,
       pillarFamily,
+      sectionKey,
       0,
       Y_STEP,
       1,
@@ -203,6 +280,7 @@ function buildSkillForest2D(
       const nid = addNode(
         parentId,
         pillarFamily,
+        sectionKey,
         0,
         0,
         0,
@@ -228,9 +306,11 @@ function buildSkillForest2D(
     if (!joinedSectionKeys.has(getForumSectionKey('technical-advice', field))) continue;
     const fieldSub = techCat.subsections.find((s) => s.slug === field)!;
     const fieldFamily = techFamilyOffset + fi;
+    const sectionKey = getForumSectionKey('technical-advice', field);
     const fieldNodeId = addNode(
       rootId,
       fieldFamily,
+      sectionKey,
       0,
       Y_STEP,
       1,
@@ -256,6 +336,7 @@ function buildSkillForest2D(
       const nid = addNode(
         parentId,
         fieldFamily,
+        sectionKey,
         0,
         0,
         0,
@@ -709,6 +790,66 @@ const BACKDROP_FS = `
   }
 `;
 
+const MIST_VS = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const MIST_FS = `
+  varying vec2 vUv;
+  uniform float uTime;
+  uniform float uDensity;
+  uniform float uSpeed;
+  uniform vec3 uTint;
+
+  float n(vec2 p) {
+    return sin(p.x) * sin(p.y);
+  }
+
+  void main() {
+    vec2 uv = vUv;
+    vec2 p = uv * 7.0;
+    float t = uTime * uSpeed;
+    float f = n(p + vec2(t * 0.7, t * 0.24));
+    f += 0.55 * n(p * 1.9 - vec2(t * 0.35, -t * 0.17));
+    f += 0.25 * n(p * 3.7 + vec2(-t * 0.18, t * 0.29));
+    f = f / (1.0 + 0.55 + 0.25);
+    f = f * 0.5 + 0.5;
+
+    float vertical = smoothstep(0.0, 0.26, uv.y) * (1.0 - smoothstep(0.58, 1.0, uv.y));
+    float alpha = smoothstep(0.35, 0.92, f) * vertical * uDensity;
+    gl_FragColor = vec4(uTint, alpha);
+  }
+`;
+
+const RAY_VS = `
+  varying vec2 vUv;
+  void main() {
+    vUv = uv;
+    gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+  }
+`;
+
+const RAY_FS = `
+  varying vec2 vUv;
+  uniform float uTime;
+  uniform vec3 uTint;
+
+  void main() {
+    vec2 uv = vUv;
+    vec2 p = uv - vec2(0.5, 0.18);
+    float ang = atan(p.y, p.x);
+    float rad = length(p);
+    float beam = smoothstep(0.0, 0.95, 1.0 - rad);
+    float streak = 0.5 + 0.5 * sin(ang * 16.0 + uTime * 0.35);
+    float alpha = beam * (0.04 + streak * 0.08) * smoothstep(0.02, 0.85, uv.y);
+    gl_FragColor = vec4(uTint, alpha);
+  }
+`;
+
 const BackgroundTree = memo(function BackgroundTree({ tree }: { tree: BgTreeDef }) {
   const { x, y, z, scale, lean } = tree;
   return (
@@ -768,6 +909,110 @@ function BackgroundForest({ bgTrees }: { bgTrees: BgTreeDef[] }) {
   );
 }
 
+function VolumetricMistLayer({
+  position,
+  size,
+  tint,
+  density,
+  speed,
+  rotation = 0,
+  order = -6,
+}: {
+  position: [number, number, number];
+  size: [number, number];
+  tint: string;
+  density: number;
+  speed: number;
+  rotation?: number;
+  order?: number;
+}) {
+  const matRef = useRef<THREE.ShaderMaterial>(null!);
+  const tintColor = useMemo(() => new THREE.Color(tint), [tint]);
+
+  useFrame(({ clock }) => {
+    const mat = matRef.current;
+    if (!mat) return;
+    mat.uniforms.uTime.value = clock.elapsedTime;
+  });
+
+  return (
+    <mesh position={position} rotation={[0, 0, rotation]} renderOrder={order}>
+      <planeGeometry args={size} />
+      <shaderMaterial
+        ref={matRef}
+        vertexShader={MIST_VS}
+        fragmentShader={MIST_FS}
+        transparent
+        depthWrite={false}
+        uniforms={{
+          uTime: { value: 0 },
+          uDensity: { value: density },
+          uSpeed: { value: speed },
+          uTint: { value: tintColor },
+        }}
+      />
+    </mesh>
+  );
+}
+
+function LightShafts() {
+  const matRef = useRef<THREE.ShaderMaterial>(null!);
+
+  useFrame(({ clock }) => {
+    const mat = matRef.current;
+    if (!mat) return;
+    mat.uniforms.uTime.value = clock.elapsedTime;
+  });
+
+  return (
+    <mesh position={[0, 4.8, -12]} rotation={[0, 0, 0.06]} renderOrder={-7}>
+      <planeGeometry args={[72, 42]} />
+      <shaderMaterial
+        ref={matRef}
+        vertexShader={RAY_VS}
+        fragmentShader={RAY_FS}
+        transparent
+        depthWrite={false}
+        blending={THREE.AdditiveBlending}
+        uniforms={{
+          uTime: { value: 0 },
+          uTint: { value: new THREE.Color('#dff0e5') },
+        }}
+      />
+    </mesh>
+  );
+}
+
+function AtmosphereFX() {
+  return (
+    <>
+      <LightShafts />
+      <VolumetricMistLayer
+        position={[0, 0.45, -8.4]}
+        size={[66, 22]}
+        tint="#d4e6de"
+        density={0.2}
+        speed={0.12}
+      />
+      <VolumetricMistLayer
+        position={[0, 1.2, -6.2]}
+        size={[54, 17]}
+        tint="#d9ece3"
+        density={0.14}
+        speed={0.18}
+        rotation={0.025}
+      />
+      <VolumetricMistLayer
+        position={[0, 2.5, -4.3]}
+        size={[42, 11]}
+        tint="#e6f4ee"
+        density={0.1}
+        speed={0.25}
+      />
+    </>
+  );
+}
+
 // ─── Trunk ──────────────────────────────────────────────────
 
 function Trunk() {
@@ -793,9 +1038,11 @@ function Trunk() {
 const BranchTube = memo(function BranchTube({
   parent,
   child,
+  sectionHelpfulVotes,
 }: {
   parent: NodeDef;
   child: NodeDef;
+  sectionHelpfulVotes: Record<string, number>;
 }) {
   const branch = useMemo(() => {
     const pz = parent.z - 0.15;
@@ -830,23 +1077,27 @@ const BranchTube = memo(function BranchTube({
 
   const bark = useMemo(() => makeBarkTextures(), []);
 
+  const helpfulVotes = child.sectionKey ? (sectionHelpfulVotes[child.sectionKey] ?? 0) : 0;
+  const tier = voteTierForHelpful(helpfulVotes);
+  const tierStyle = VOTE_TIER_STYLES[tier];
   const di = Math.min(parent.depth, BR_C.length - 1);
   const color = useMemo(() => {
-    const c = new THREE.Color(BR_C[di]);
+    const c = new THREE.Color(tierStyle.color);
     const hsl = { h: 0, s: 0, l: 0 };
     c.getHSL(hsl);
     const hueJitter = (hash(child.id * 43 + parent.id * 17) - 0.5) * 0.045;
-    const satBoost = 0.05 + hash(child.id * 89) * 0.08;
+    const satBoost = tier === 'none' ? 0.0 : 0.03 + hash(child.id * 89) * 0.08;
     const lightJitter = (hash(child.id * 131) - 0.5) * 0.12;
+    const depthLift = parent.depth * 0.012;
     c.setHSL(
       (hsl.h + hueJitter + 1) % 1,
       THREE.MathUtils.clamp(hsl.s + satBoost, 0, 1),
-      THREE.MathUtils.clamp(hsl.l + lightJitter + 0.08, 0.30, 0.72),
+      THREE.MathUtils.clamp(hsl.l + lightJitter + depthLift, 0.25, 0.78),
     );
     return c;
-  }, [di, child.id, parent.id]);
-  const roughness = BR_ROUGHNESS[di];
-  const metalness = BR_METALNESS[di];
+  }, [tierStyle.color, tier, child.id, parent.id, parent.depth]);
+  const roughness = tierStyle.roughness;
+  const metalness = tierStyle.metalness;
 
   return (
     <group>
@@ -859,8 +1110,8 @@ const BranchTube = memo(function BranchTube({
           roughnessMap={bark?.roughness}
           roughness={roughness}
           metalness={metalness}
-          emissive={color.clone().multiplyScalar(0.18)}
-          emissiveIntensity={0.12}
+          emissive={color.clone().multiplyScalar(tierStyle.emissive)}
+          emissiveIntensity={Math.max(0.04, tierStyle.emissive)}
         />
       </mesh>
     </group>
@@ -870,6 +1121,7 @@ const BranchTube = memo(function BranchTube({
 interface SkillNodeProps {
   node: NodeDef;
   pos: [number, number, number];
+  sectionHelpfulVotes: Record<string, number>;
   isHovered: boolean;
   onHover: (id: number | null) => void;
   onClick: (node: NodeDef, e: ThreeEvent<MouseEvent>) => void;
@@ -882,6 +1134,7 @@ function nodeShapeIndex(node: NodeDef): number {
 const SkillNode = memo(function SkillNode({
   node,
   pos,
+  sectionHelpfulVotes,
   isHovered,
   onHover,
   onClick,
@@ -891,7 +1144,16 @@ const SkillNode = memo(function SkillNode({
   const glowOuterRef = useRef<THREE.MeshBasicMaterial>(null!);
   const glowInnerRef = useRef<THREE.MeshBasicMaterial>(null!);
 
-  const baseColor = useMemo(() => new THREE.Color(node.color), [node.color]);
+  const helpfulVotes = node.sectionKey ? (sectionHelpfulVotes[node.sectionKey] ?? 0) : 0;
+  const tier = voteTierForHelpful(helpfulVotes);
+  const tierStyle = VOTE_TIER_STYLES[tier];
+  const baseColor = useMemo(() => {
+    const c = new THREE.Color(tierStyle.color);
+    const hsl = { h: 0, s: 0, l: 0 };
+    c.getHSL(hsl);
+    c.setHSL(hsl.h, hsl.s, THREE.MathUtils.clamp(hsl.l + node.depth * 0.012, 0.22, 0.84));
+    return c;
+  }, [tierStyle.color, node.depth]);
   const white = useMemo(() => new THREE.Color('#ffffff'), []);
   const shape = useMemo(() => nodeShapeIndex(node), [node]);
   const pulse = useMemo(() => 0.8 + hash(node.id * 17.3) * 1.2, [node.id]);
@@ -932,11 +1194,11 @@ const SkillNode = memo(function SkillNode({
     mat.emissive.lerp(isHovered ? baseColor : BLACK, 0.12);
     mat.emissiveIntensity = THREE.MathUtils.lerp(
       mat.emissiveIntensity,
-      isHovered ? 1.2 : 0.44,
+      isHovered ? Math.max(0.9, tierStyle.emissive * 2.4) : tierStyle.emissive,
       0.12,
     );
-    glowOuter.opacity = THREE.MathUtils.lerp(glowOuter.opacity, isHovered ? 0.4 : 0.12, 0.1);
-    glowInner.opacity = THREE.MathUtils.lerp(glowInner.opacity, isHovered ? 0.55 : 0.2, 0.1);
+    glowOuter.opacity = THREE.MathUtils.lerp(glowOuter.opacity, isHovered ? 0.4 : tierStyle.glowOuter, 0.1);
+    glowInner.opacity = THREE.MathUtils.lerp(glowInner.opacity, isHovered ? 0.55 : tierStyle.glowInner, 0.1);
   });
 
   return (
@@ -945,9 +1207,9 @@ const SkillNode = memo(function SkillNode({
         {renderPolyGeometry(node.size * 2.1)}
         <meshBasicMaterial
           ref={glowOuterRef}
-          color={node.color}
+          color={baseColor}
           transparent
-          opacity={0.12}
+          opacity={tierStyle.glowOuter}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
         />
@@ -956,9 +1218,9 @@ const SkillNode = memo(function SkillNode({
         {renderPolyGeometry(node.size * 1.52)}
         <meshBasicMaterial
           ref={glowInnerRef}
-          color={node.color}
+          color={baseColor}
           transparent
-          opacity={0.2}
+          opacity={tierStyle.glowInner}
           blending={THREE.AdditiveBlending}
           depthWrite={false}
         />
@@ -974,11 +1236,11 @@ const SkillNode = memo(function SkillNode({
         {renderPolyGeometry(node.size)}
         <meshStandardMaterial
           ref={matRef}
-          color={node.color}
-          emissive={node.color}
-          emissiveIntensity={0.44}
-          roughness={0.22}
-          metalness={0.35}
+          color={baseColor}
+          emissive={baseColor}
+          emissiveIntensity={tierStyle.emissive}
+          roughness={tierStyle.roughness}
+          metalness={tierStyle.metalness}
         />
       </mesh>
     </group>
@@ -1039,11 +1301,13 @@ function Fireflies() {
 
 function TreeMeshes({
   treeData,
+  sectionHelpfulVotes,
   hovered,
   onHover,
   onNodeClick,
 }: {
   treeData: TreeData;
+  sectionHelpfulVotes: Record<string, number>;
   hovered: number | null;
   onHover: (id: number | null) => void;
   onNodeClick: (node: NodeDef, e: ThreeEvent<MouseEvent>) => void;
@@ -1054,13 +1318,19 @@ function TreeMeshes({
     <>
       <Trunk />
       {nodes.filter((n) => n.parentId !== null).map((n) => (
-        <BranchTube key={n.id} parent={nodes[n.parentId!]} child={n} />
+        <BranchTube
+          key={n.id}
+          parent={nodes[n.parentId!]}
+          child={n}
+          sectionHelpfulVotes={sectionHelpfulVotes}
+        />
       ))}
       {nodes.map((node) => (
         <SkillNode
           key={node.id}
           node={node}
           pos={positions[node.id]}
+          sectionHelpfulVotes={sectionHelpfulVotes}
           isHovered={hovered === node.id}
           onHover={onHover}
           onClick={onNodeClick}
@@ -1073,6 +1343,7 @@ function TreeMeshes({
 interface OrthoSkillSceneProps {
   treeData: TreeData;
   bgTrees: BgTreeDef[];
+  sectionHelpfulVotes: Record<string, number>;
   viewPixels?: { w: number; h: number };
   viewState?: ViewState;
   setViewState?: Dispatch<SetStateAction<ViewState>>;
@@ -1096,6 +1367,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
     onNodeActivate,
     treeData,
     bgTrees,
+    sectionHelpfulVotes,
   } = props;
   const { camera, gl, size } = useThree();
   const [internalVs, setInternalVs] = useState<ViewState>(DEFAULT_VIEW);
@@ -1188,7 +1460,13 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
 
     cam.updateProjectionMatrix();
   });
-
+useEffect(() => {
+  const original = document.body.style.overflow;
+  document.body.style.overflow = 'hidden';
+  return () => {
+    document.body.style.overflow = original;
+  };
+}, []);
   useEffect(() => {
     const el = gl.domElement;
     // eslint-disable-next-line react-hooks/immutability
@@ -1213,7 +1491,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
         const mwy = cur.bottom + (1 - my / vh) * (cur.top - cur.bottom);
 
         const newZoom = THREE.MathUtils.clamp(
-          prev.zoom * (1 - e.deltaY * ZOOM_FACTOR),
+          prev.zoom * (1 + e.deltaY * ZOOM_FACTOR),
           MIN_ZOOM,
           MAX_ZOOM,
         );
@@ -1353,6 +1631,7 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
       <BackgroundForest bgTrees={bgTrees} />
       <TreeMeshes
         treeData={treeData}
+        sectionHelpfulVotes={sectionHelpfulVotes}
         hovered={hovered}
         onHover={handleHover}
         onNodeClick={onNodeClick}
@@ -1375,9 +1654,11 @@ function OrthoSkillScene(props: OrthoSkillSceneProps = {}) {
 }
 
 export default function SkillTree() {
+  const { displayName } = useAuth();
   const router = useRouter();
   const [activeNodeId, setActiveNodeId] = useState<number>(0);
   const [joinedForums, setJoinedForums] = useState<Set<string>>(() => getJoinedForums());
+  const [sectionHelpfulVotes, setSectionHelpfulVotes] = useState<Record<string, number>>({});
 
   useEffect(() => {
     function onJoinedChange() {
@@ -1388,6 +1669,41 @@ export default function SkillTree() {
     window.addEventListener(JOINED_FORUMS_CHANGE_EVENT, onJoinedChange);
     return () => window.removeEventListener(JOINED_FORUMS_CHANGE_EVENT, onJoinedChange);
   }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadVotesBySection() {
+      if (!displayName) {
+        setSectionHelpfulVotes({});
+        return;
+      }
+
+      const { data, error } = await supabase
+        .from('posts')
+        .select('category, subcategory, helpful_count')
+        .eq('author_name', displayName);
+
+      if (cancelled) return;
+      if (error || !data) {
+        setSectionHelpfulVotes({});
+        return;
+      }
+
+      const next: Record<string, number> = {};
+      for (const row of data as { category?: string | null; subcategory?: string | null; helpful_count?: number | null }[]) {
+        const sectionKey = getSectionKeyFromPost(row.category, row.subcategory);
+        if (!sectionKey) continue;
+        next[sectionKey] = (next[sectionKey] ?? 0) + (row.helpful_count ?? 0);
+      }
+      setSectionHelpfulVotes(next);
+    }
+
+    loadVotesBySection();
+    return () => {
+      cancelled = true;
+    };
+  }, [displayName]);
 
   const treeData = useMemo(() => buildNodes(joinedForums), [joinedForums]);
   const bgTrees = useMemo(() => {
@@ -1423,6 +1739,7 @@ export default function SkillTree() {
 
   return (
     <div
+      className={styles.skilltreeScrollHide}
       style={{
         position: 'relative',
         minHeight: '100dvh',
@@ -1435,6 +1752,7 @@ export default function SkillTree() {
         <OrthoSkillScene
           treeData={treeData}
           bgTrees={bgTrees}
+          sectionHelpfulVotes={sectionHelpfulVotes}
           onNodeHover={handleNodeHover}
           onNodeActivate={handleNodeActivate}
         />
@@ -1444,7 +1762,7 @@ export default function SkillTree() {
           style={{
             position: 'absolute',
             right: 12,
-            bottom: 12,
+            bottom: 70,
             zIndex: 24,
             width: 'min(360px, calc(100% - 24px))',
             background: 'rgba(15, 23, 42, 0.84)',
