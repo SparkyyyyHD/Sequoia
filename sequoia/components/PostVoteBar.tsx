@@ -1,7 +1,6 @@
 "use client";
 
-import { useState } from "react";
-import { useRouter } from "next/navigation";
+import { useEffect, useState } from "react";
 import { supabase } from "@/lib/supabase";
 import { getOrCreateVoterKey } from "@/lib/voterKey";
 
@@ -13,6 +12,26 @@ type PostVoteBarProps = {
   onMyVoteUpdate: (postId: string, vote: 1 | -1 | null) => void;
 };
 
+function applyVoteCountDelta(
+  helpful: number,
+  notHelpful: number,
+  previousVote: 1 | -1 | null,
+  nextVote: 1 | -1 | null
+) {
+  let nextHelpful = helpful;
+  let nextNotHelpful = notHelpful;
+
+  if (previousVote === 1) nextHelpful -= 1;
+  if (previousVote === -1) nextNotHelpful -= 1;
+  if (nextVote === 1) nextHelpful += 1;
+  if (nextVote === -1) nextNotHelpful += 1;
+
+  return {
+    helpful: Math.max(0, nextHelpful),
+    notHelpful: Math.max(0, nextNotHelpful),
+  };
+}
+
 export default function PostVoteBar({
   postId,
   helpfulCount,
@@ -20,9 +39,19 @@ export default function PostVoteBar({
   myVote,
   onMyVoteUpdate,
 }: PostVoteBarProps) {
-  const router = useRouter();
   const [pending, setPending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [displayCounts, setDisplayCounts] = useState({
+    helpful: helpfulCount ?? 0,
+    notHelpful: notHelpfulCount ?? 0,
+  });
+
+  useEffect(() => {
+    setDisplayCounts({
+      helpful: helpfulCount ?? 0,
+      notHelpful: notHelpfulCount ?? 0,
+    });
+  }, [helpfulCount, notHelpfulCount, postId]);
 
   async function applyVote(next: 1 | -1) {
     setError(null);
@@ -47,12 +76,16 @@ export default function PostVoteBar({
       p_post_ids: [postId],
     });
     const row = (data as { post_id: string; vote: number }[] | null)?.[0];
-    onMyVoteUpdate(postId, row ? (row.vote as 1 | -1) : null);
-    router.refresh();
+    const nextVote = (row ? (row.vote as 1 | -1) : null) as 1 | -1 | null;
+
+    setDisplayCounts((prev) =>
+      applyVoteCountDelta(prev.helpful, prev.notHelpful, myVote ?? null, nextVote)
+    );
+    onMyVoteUpdate(postId, nextVote);
   }
 
-  const h = helpfulCount ?? 0;
-  const n = notHelpfulCount ?? 0;
+  const h = displayCounts.helpful;
+  const n = displayCounts.notHelpful;
 
   return (
     <div className="mt-2 flex flex-wrap items-center gap-2 border-t border-[var(--forum-line-subtle)] pt-2">
