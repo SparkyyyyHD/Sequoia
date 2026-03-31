@@ -395,6 +395,30 @@ body {
   text-transform: uppercase;
 }
 
+.forum-sequoia-badge {
+  border-width: 1px;
+  border-style: solid;
+  letter-spacing: 0.02em;
+}
+
+.forum-sequoia-badge--contributor {
+  background: #ecfdf5;
+  border-color: #6ee7b7;
+  color: #047857;
+}
+
+.forum-sequoia-badge--voice {
+  background: #eff6ff;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+.forum-sequoia-badge--legend {
+  background: #fffbeb;
+  border-color: #fcd34d;
+  color: #b45309;
+}
+
 .forum-post-title {
   font-size: 1.0625rem;
   font-weight: 600;

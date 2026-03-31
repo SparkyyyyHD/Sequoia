@@ -14,6 +14,8 @@ import AuthorAvatar from "@/components/AuthorAvatar";
 import PostTitleAndTags from "@/components/PostTitleAndTags";
 import { getDisplayPostBody } from "@/lib/postTags";
 import { fetchAvatarUrls } from "@/lib/profiles";
+import { fetchAuthorSequoiaPoints } from "@/lib/authorPoints";
+import SequoiaBadge from "@/components/SequoiaBadge";
 
 interface PostListProps {
   posts: Post[];
@@ -25,6 +27,7 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
   const [openComments, setOpenComments] = useState<Set<string>>(new Set());
   const [commentCounts, setCommentCounts] = useState<Record<string, number>>({});
   const [avatarUrls, setAvatarUrls] = useState<Record<string, string>>({});
+  const [authorPoints, setAuthorPoints] = useState<Record<string, number>>({});
   const idsKey = useMemo(() => posts.map((p) => p.id).sort().join(","), [posts]);
 
   useEffect(() => {
@@ -83,8 +86,22 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
 
   useEffect(() => {
     const names = posts.map((p) => p.author_name).filter(Boolean) as string[];
-    if (names.length === 0) return;
-    fetchAvatarUrls(names).then(setAvatarUrls);
+    if (names.length === 0) {
+      queueMicrotask(() => {
+        setAvatarUrls({});
+        setAuthorPoints({});
+      });
+      return;
+    }
+    let cancelled = false;
+    Promise.all([fetchAvatarUrls(names), fetchAuthorSequoiaPoints(names)]).then(([urls, points]) => {
+      if (cancelled) return;
+      setAvatarUrls(urls);
+      setAuthorPoints(points);
+    });
+    return () => {
+      cancelled = true;
+    };
   }, [idsKey, posts]);
 
   function handleMyVoteUpdate(postId: string, vote: 1 | -1 | null) {
@@ -129,10 +146,13 @@ export default function PostList({ posts, showSubsectionLink }: PostListProps) {
                 size="md"
               />
               <div className="min-w-0 flex-1">
-                <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+                <div className="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                   <span className="text-sm font-semibold text-[var(--forum-text-primary)]">
                     {post.author_name?.trim() || "Anonymous"}
                   </span>
+                  {post.author_name ? (
+                    <SequoiaBadge points={authorPoints[post.author_name] ?? 0} />
+                  ) : null}
                   <time
                     dateTime={post.created_at}
                     className="text-xs text-[var(--forum-text-muted)]"

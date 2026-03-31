@@ -18,6 +18,8 @@ import {
 } from "@/lib/skillTrees";
 import type { Post } from "@/lib/postTypes";
 import { POST_LIST_FIELDS } from "@/lib/postSelect";
+import SequoiaBadge, { SequoiaBadgeForTier } from "@/components/SequoiaBadge";
+import { formatBadgeThresholdLine, getEarnedSequoiaBadges } from "@/lib/sequoiaBadges";
 
 // ── helpers ──────────────────────────────────────────────────
 
@@ -49,7 +51,6 @@ function MiniBar({
     <div
       className="flex-1 rounded-sm"
       style={{
-        height: "100%",
         background:
           value === 0
             ? "var(--forum-line-subtle)"
@@ -162,6 +163,8 @@ export default function AccountPage() {
     return { helpful, notHelpful, points, totalPosts: posts.length };
   }, [posts]);
 
+  const earnedBadges = useMemo(() => getEarnedSequoiaBadges(stats.points), [stats.points]);
+
   // ── activity heatmap ──────────────────────────────────────
   const dayKeys = useMemo(() => last30DayKeys(), []);
 
@@ -262,11 +265,15 @@ export default function AccountPage() {
           {/* Header */}
           <header className="forum-card p-4 sm:p-5">
             <p className="forum-kicker">Account</p>
-            <h1 className="mt-0.5 text-lg font-semibold text-[var(--forum-text-primary)]">
-              {displayName}
-            </h1>
+            <div className="mt-0.5 flex flex-wrap items-center gap-2">
+              <h1 className="text-lg font-semibold text-[var(--forum-text-primary)]">
+                {displayName}
+              </h1>
+              <SequoiaBadge points={stats.points} size="md" />
+            </div>
             <p className="mt-1 text-sm text-[var(--forum-text-secondary)]">
               Sequoia points are earned when other users find your posts helpful. Points reflect your contribution across all joined sections.
+              Badges unlock at 100, 500, and 1,000 lifetime points.
             </p>
           </header>
 
@@ -296,6 +303,33 @@ export default function AccountPage() {
                 </p>
               </article>
             ))}
+          </section>
+
+          {/* Earned badges */}
+          <section className="forum-card mt-4 p-4 sm:p-5">
+            <h2 className="text-xs font-semibold uppercase tracking-wide text-[var(--forum-text-muted)]">
+              Recent badges earned
+            </h2>
+            {earnedBadges.length === 0 ? (
+              <p className="mt-3 text-sm text-[var(--forum-text-secondary)]">
+                No badges yet. Your first unlocks at over 100 Sequoia points when others mark your posts as
+                helpful.
+              </p>
+            ) : (
+              <ul className="mt-3 space-y-0 divide-y divide-[var(--forum-border)]">
+                {earnedBadges.map((tier) => (
+                  <li key={tier.id} className="flex flex-wrap items-start gap-3 py-3 first:pt-0 last:pb-0">
+                    <SequoiaBadgeForTier tier={tier} size="md" />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-[var(--forum-text-primary)]">{tier.label}</p>
+                      <p className="mt-0.5 text-sm text-[var(--forum-text-muted)]">
+                        {formatBadgeThresholdLine(tier)}
+                      </p>
+                    </div>
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
 
           {/* Helpful ratio bar */}
